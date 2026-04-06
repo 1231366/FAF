@@ -1,5 +1,6 @@
 <?php
-require 'db.php';
+// AJUSTADO: Usa o config centralizado para a ligação à DB e gestão de erros
+require_once __DIR__ . '/../core/config.php';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $name = $_POST['name'];
@@ -14,13 +15,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $stmt->bind_param("sss", $name, $email, $password_hash);
 
     if ($stmt->execute()) {
-        // Sucesso: Volta para o login com mensagem de sucesso
-        header("Location: login.php?success=1");
+        // AJUSTADO: Sucesso - Volta para o login dentro da pasta public
+        header("Location: ../../public/login.php?success=1");
     } else {
-        // Erro (ex: email já existe)
-        header("Location: login.php?error=exists");
+        // AJUSTADO: Erro (ex: email já existe) - Volta para o login dentro da pasta public
+        header("Location: ../../public/login.php?error=exists");
     }
+    
     $stmt->close();
     $conn->close();
+    exit();
 }
 ?>

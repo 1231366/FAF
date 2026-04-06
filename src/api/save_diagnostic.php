@@ -1,8 +1,8 @@
 <?php
-session_start();
-require_once 'db.php';
+// AJUSTADO: Usa o config centralizado para a ligação à DB e sessão
+require_once __DIR__ . '/../core/config.php';
 
-// Ativar reporte de erros para saberes exatamente o que falha se der erro de novo
+// Ativar reporte de erros para debugging total
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SESSION['user_id'])) {
@@ -21,14 +21,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SESSION['user_id'])) {
         $r_pace    = $_POST['current_pb_pace'];
         $days      = $_POST['weekly_days'];
 
-        // Cálculo automático do ciclo
+        // Cálculo automático do ciclo (Semanas até à prova)
         $today = new DateTime();
         $target = new DateTime($race_date);
         $interval = $today->diff($target);
         $weeks = ceil($interval->days / 7);
-        if($weeks < 4) $weeks = 4; 
+        if($weeks < 4) $weeks = 4; // Mínimo de 4 semanas de preparação
 
-        // Query corrigida: Removi o user_id do UPDATE (não faz sentido atualizar a FK)
+        // Query para inserir ou atualizar o perfil do atleta
         $query = "INSERT INTO user_profiles (user_id, weight, height, age, fitness_level, target_distance, race_date, target_pace, ref_dist, ref_pace, available_days, prep_cycle) 
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
                   ON DUPLICATE KEY UPDATE 
@@ -46,39 +46,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_SESSION['user_id'])) {
         
         $stmt = $conn->prepare($query);
         
-        // Agora só precisamos de fazer bind das 12 variáveis uma única vez!
-        // s = string, i = integer, d = double (float)
-        // Ordem: uid(i), weight(i), height(i), age(i), level(s), dist(i), race_date(s), t_pace(s), r_dist(d), r_pace(s), days(s), weeks(i)
+        // Tipos de dados: i = integer, s = string, d = double
         $types = "iiiisissidss"; 
         
         $stmt->bind_param($types, 
-            $uid, 
-            $weight, 
-            $height, 
-            $age, 
-            $level, 
-            $dist, 
-            $race_date, 
-            $t_pace, 
-            $r_dist, 
-            $r_pace, 
-            $days, 
-            $weeks
+            $uid, $weight, $height, $age, $level, $dist, 
+            $race_date, $t_pace, $r_dist, $r_pace, $days, $weeks
         );
         
         if ($stmt->execute()) {
-            // Atualiza o status do usuário
+            // Atualiza o status do utilizador para indicar que o diagnóstico foi concluído
             $conn->query("UPDATE users SET diagnostic_completed = 1 WHERE id = $uid");
             
             $_SESSION['plan_generated_now'] = true;
-            header("Location: plan.php");
+            
+            // AJUSTADO: Redireciona para o plano na pasta public
+            header("Location: ../../public/plan.php");
             exit();
         }
 
     } catch (Exception $e) {
-        // Se houver erro, ele mostra-te aqui em vez de dar Erro 500
         die("Erro Crítico no Diagnóstico: " . $e->getMessage());
     }
 } else {
-    die("Acesso inválido ou sessão expirada.");
+    // AJUSTADO: Se a sessão expirou, volta para o login
+    header("Location: ../../public/login.php");
+    exit();
 }

@@ -1,5 +1,5 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../core/config.php';
 
 // --- 1. UTILITÁRIOS DE CONVERSÃO (Blindagem Total) ---
 if (!function_exists('paceToSec')) {

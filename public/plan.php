@@ -1,66 +1,43 @@
 <?php
-session_start();
-require_once 'db.php';
-if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
+require_once __DIR__ . '/../src/core/config.php';
+
+if (!isset($_SESSION['user_id'])) { 
+    header("Location: login.php"); 
+    exit(); 
+}
 
 $user_id = $_SESSION['user_id'];
 
-// --- LÓGICA DE FEEDBACK (GUARDAR TREINO) ---
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_workout') {
-    $workout_id = $_POST['workout_id'];
-    $status = $_POST['status']; // 'completed' ou 'skipped'
-    
-    if ($status === 'completed') {
-        $real_dist = $_POST['real_distance'];
-        $real_pace = $_POST['real_pace'];
-        $effort = $_POST['effort_level'];
-        
-        $stmt = $conn->prepare("UPDATE training_plans SET status = 'completed', is_completed = 1, real_distance = ?, real_pace = ?, effort_level = ?, completed_at = NOW() WHERE id = ? AND user_id = ?");
-        $stmt->bind_param("dssii", $real_dist, $real_pace, $effort, $workout_id, $user_id);
-    } else {
-        $stmt = $conn->prepare("UPDATE training_plans SET status = 'skipped', is_completed = 0 WHERE id = ? AND user_id = ?");
-        $stmt->bind_param("ii", $workout_id, $user_id);
-    }
-    $stmt->execute();
-    header("Location: plan.php?week=" . ($_GET['week'] ?? 1));
-    exit();
-}
-
-// --- LÓGICA DE ABORT (INCINERAR) INTEGRADA ---
-if (isset($_GET['action']) && $_GET['action'] === 'abort') {
-    try {
-        $stmt1 = $conn->prepare("DELETE FROM training_plans WHERE user_id = ?");
-        $stmt1->bind_param("i", $user_id);
-        $stmt1->execute();
-        $stmt2 = $conn->prepare("UPDATE user_profiles SET target_distance = NULL, race_date = NULL, prep_cycle = NULL WHERE user_id = ?");
-        $stmt2->bind_param("i", $user_id);
-        if($stmt2->execute()) { header("Location: methricsdiagonotic.php"); exit(); }
-        else { throw new Exception($conn->error); }
-    } catch (Exception $e) { die("Erro Crítico no Engine: " . $e->getMessage()); }
-}
-
-// QUERY REFINADA: Busca dados de utilizador e perfil
+/**
+ * 1. DATA LAYER
+ */
 $query = "SELECT u.name, u.profile_pic, p.* FROM users u LEFT JOIN user_profiles p ON u.id = p.user_id WHERE u.id = ?";
 $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $userData = $stmt->get_result()->fetch_assoc();
 
-$current_week = isset($_GET['week']) ? (int)$_GET['week'] : 1;
-$total_cycle_weeks = (int)($userData['prep_cycle'] ?? 12);
-require_once 'kernel_engine.php'; 
+/**
+ * 2. IDENTITY LAYER
+ */
+$userName = $userData['name'] ?? $_SESSION['user_name'] ?? 'Atleta';
+$userPic  = $userData['profile_pic'] ?? $_SESSION['user_pic'] ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($userName);
+$first_name = explode(' ', $userName)[0];
 
+/**
+ * 3. ENGINE LAYER
+ */
+$current_week = isset($_GET['week']) ? (int)$_GET['week'] : 1;
+require_once __DIR__ . '/../src/engines/kernel_engine.php'; 
+
+$total_cycle_weeks = (int)($userData['prep_cycle'] ?? 12);
 $volume_total = 0;
 $ordem_dias = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
 if (isset($weekly_workouts)) {
     foreach ($weekly_workouts as $w) { $volume_total += (float)($w['distance'] ?? 0); }
 }
 
-$userName = $userData['name'] ?? 'Atleta';
-$userPic  = $userData['profile_pic'] ?? $_SESSION['user_pic'] ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($userName);
-$first_name = explode(' ', $userName)[0];
 $hoje_nome = ['Sun'=>'Dom', 'Mon'=>'Seg', 'Tue'=>'Ter', 'Wed'=>'Qua', 'Thu'=>'Qui', 'Fri'=>'Sex', 'Sat'=>'Sab'][date('D')];
-
 $target_dist = (int)($userData['target_distance'] ?? 42);
 $target_label = ($target_dist <= 5) ? "5KM" : (($target_dist <= 10) ? "10KM" : (($target_dist <= 21) ? "HALF MARATHON" : "MARATHON"));
 
@@ -108,6 +85,14 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         .nav-active { color: #c3f400 !important; background: rgba(195, 244, 0, 0.1); border-radius: 20px; }
         .drag-handle { cursor: grab; }
         #abort-modal, #feedback-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+
+        /* Estilos do Coach Flutuante */
+        #coach-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); z-index: 4000; align-items: center; justify-content: center; padding: 20px; }
+        #coach-modal-chat { width: 100%; max-width: 420px; height: 70vh; background: #0d0d0d; border: 1px solid rgba(195,244,0,0.15); border-radius: 35px; display: flex; flex-direction: column; overflow: hidden; }
+        #coach-overlay.active { display: flex; animation: sheetUp 0.4s cubic-bezier(0.2, 1, 0.3, 1) forwards; }
+        @keyframes sheetUp { from { opacity: 0; transform: translateY(50px); } to { opacity: 1; transform: translateY(0); } }
+        .coach-bubble { align-self: flex-start; background: rgba(255,255,255,0.05); padding: 12px 16px; border-radius: 4px 20px 20px 20px; font-size: 13px; max-width: 85%; border-left: 2px solid #c3f400; margin-bottom: 12px; }
+        .user-bubble { align-self: flex-end; background: #c3f400; color: #000; padding: 12px 16px; border-radius: 20px 20px 4px 20px; font-weight: 800; font-style: italic; font-size: 13px; max-width: 85%; margin-bottom: 12px; }
     </style>
 </head>
 <body>
@@ -136,8 +121,11 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <?php endfor; ?>
             </div>
 
-            <div class="flex gap-3 items-center bg-white/5 p-3 rounded-2xl border border-white/5">
-                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=CoachK" class="w-8 h-8 rounded-full border border-faf-neon/30">
+            <div onclick="openCoachChat()" class="flex gap-3 items-center bg-white/5 p-3 rounded-2xl border border-white/5 cursor-pointer active:scale-95 transition-all">
+                <div class="relative">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=CoachK" class="w-8 h-8 rounded-full border border-faf-neon/30">
+                    <div class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-faf-neon rounded-full border border-black animate-pulse"></div>
+                </div>
                 <p class="text-[10px] text-white/70 italic leading-tight">"<?= $coach_msg ?>"</p>
             </div>
 
@@ -265,6 +253,30 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         </div>
     </main>
 
+    <div id="coach-overlay">
+        <div id="coach-modal-chat">
+            <header class="p-6 border-b border-white/5 flex justify-between items-center bg-black/40">
+                <div class="flex items-center gap-3">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=CoachK" class="w-10 h-10 rounded-full border border-faf-neon/30">
+                    <div>
+                        <h3 class="font-headline font-black italic uppercase text-faf-neon text-sm">Coach Neural</h3>
+                        <span class="text-[8px] text-white/30 uppercase font-black">Bio-Sincronização Ativa</span>
+                    </div>
+                </div>
+                <button onclick="closeCoachChat()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40"><span class="material-symbols-outlined text-sm">close</span></button>
+            </header>
+            <div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-4 flex flex-col">
+                <div class="coach-bubble italic">Boas, <?= $first_name ?>. Como te posso ajudar?</div>
+            </div>
+            <div class="p-6 bg-black">
+                <div class="glass-card p-1.5 rounded-[28px] flex items-center gap-2 border-faf-neon/20 focus-within:border-faf-neon transition-all">
+                    <input id="chat-input" type="text" placeholder="Reportar treino..." class="flex-1 bg-transparent border-none focus:ring-0 text-sm p-3 text-white placeholder:text-white/20">
+                    <button onclick="sendMessage()" class="w-11 h-11 rounded-2xl bg-faf-neon text-black flex items-center justify-center active:scale-90 transition-all"><span class="material-symbols-outlined font-black">send</span></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="abort-modal">
         <div class="glass-card p-10 rounded-[50px] border border-red-600/30 max-w-sm w-full text-center space-y-8">
             <span class="material-symbols-outlined text-red-600 text-6xl">warning</span>
@@ -273,39 +285,34 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <p class="text-xs text-white/40 italic leading-relaxed">Confirmas a destruição total do protocolo atual? Esta ação é irreversível.</p>
             </div>
             <div class="space-y-3">
-                <button onclick="window.location.href='plan.php?action=abort'" class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-[0_10px_20px_rgba(220,38,38,0.2)]">Confirmar Incineração</button>
+                <button onclick="window.location.href='../src/api/abort_engine.php'" class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-[0_10px_20px_rgba(220,38,38,0.2)]">Confirmar Incineração</button>
                 <button onclick="closeAbortModal()" class="w-full py-5 bg-white/5 text-white/40 rounded-2xl font-black uppercase italic text-xs tracking-widest">Cancelar</button>
             </div>
         </div>
     </div>
 
     <div id="feedback-modal">
-        <form action="plan.php?week=<?= $current_week ?>" method="POST" class="glass-card p-8 rounded-[50px] border border-faf-neon/20 max-w-sm w-full space-y-6">
-            <input type="hidden" name="action" value="save_workout">
-            <input type="hidden" id="modal_workout_id" name="workout_id">
-            
+        <div class="glass-card p-8 rounded-[50px] border border-faf-neon/20 max-w-sm w-full space-y-6">
+            <input type="hidden" id="modal_workout_id">
             <div class="flex justify-between items-center">
                 <h3 class="text-xl font-headline font-black italic uppercase italic text-faf-neon">Workout Feedback</h3>
                 <span onclick="closeCheckIn()" class="material-symbols-outlined text-white/20 cursor-pointer">close</span>
             </div>
-
-            <select name="status" id="workout_status" onchange="toggleFeedbackFields()" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black uppercase italic outline-none text-white">
+            <select id="workout_status" onchange="toggleFeedbackFields()" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black uppercase italic outline-none text-white">
                 <option value="completed">TREINO CONCLUÍDO</option>
                 <option value="skipped">NÃO CONSEGUI FAZER</option>
             </select>
-
             <div id="feedback_fields" class="space-y-4">
                 <div class="grid grid-cols-2 gap-3">
                     <div class="space-y-1">
                         <label class="text-[9px] font-black uppercase text-white/30 ml-2 italic">Real KM</label>
-                        <input type="number" step="0.01" name="real_distance" id="modal_dist" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none focus:border-faf-neon transition-all">
+                        <input type="number" step="0.01" id="modal_real_dist" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none focus:border-faf-neon transition-all">
                     </div>
                     <div class="space-y-1">
                         <label class="text-[9px] font-black uppercase text-white/30 ml-2 italic">Real Pace</label>
-                        <input type="text" name="real_pace" placeholder="5:30" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none focus:border-faf-neon transition-all">
+                        <input type="text" id="modal_real_pace" placeholder="5:30" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none focus:border-faf-neon transition-all">
                     </div>
                 </div>
-
                 <div class="space-y-1">
                     <label class="text-[9px] font-black uppercase text-white/30 ml-2 italic">Esforço Sentido</label>
                     <div class="grid grid-cols-3 gap-2">
@@ -324,9 +331,8 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                     </div>
                 </div>
             </div>
-
-            <button type="submit" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Sincronizar Dados</button>
-        </form>
+            <button onclick="submitWorkoutFeedback()" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Sincronizar Dados</button>
+        </div>
     </div>
 
     <nav class="fixed bottom-0 left-0 w-full p-6 pb-[var(--safe-bottom)] z-[400] bg-gradient-to-t from-black via-black/80 to-transparent">
@@ -351,67 +357,79 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     </nav>
 
     <script>
-        function openAbortModal() { document.getElementById('abort-modal').style.display = 'flex'; }
-        function closeAbortModal() { document.getElementById('abort-modal').style.display = 'none'; }
+        // COACH UI
+        function openCoachChat() {
+            document.getElementById('coach-overlay').classList.add('active');
+            setTimeout(() => document.getElementById('chat-input').focus(), 400);
+        }
+        function closeCoachChat() { document.getElementById('coach-overlay').classList.remove('active'); }
 
-        // Lógica de Feedback/Check-in
-        function openCheckIn(id, type, dist) {
-            document.getElementById('modal_workout_id').value = id;
-            document.getElementById('modal_dist').value = dist;
-            document.getElementById('feedback-modal').style.display = 'flex';
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const container = document.getElementById('chat-messages');
+            if (!input.value.trim()) return;
+            const msg = input.value; input.value = '';
+            const userDiv = document.createElement('div'); userDiv.className = 'user-bubble'; userDiv.innerText = msg;
+            container.appendChild(userDiv); container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            const loading = document.createElement('div'); loading.className = 'coach-bubble opacity-50'; loading.innerText = 'Neural Process...';
+            container.appendChild(loading);
+            try {
+                const response = await fetch('../src/engines/ai_engine.php', { method: 'POST', body: JSON.stringify({ message: msg }) });
+                const data = await response.json(); container.removeChild(loading);
+                const coachDiv = document.createElement('div'); coachDiv.className = 'coach-bubble italic'; coachDiv.innerText = data.reply;
+                container.appendChild(coachDiv); container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            } catch (e) { loading.innerText = "Connection Error."; }
         }
 
-        function closeCheckIn() {
-            document.getElementById('feedback-modal').style.display = 'none';
+        // FEEDBACK AJAX
+        async function submitWorkoutFeedback() {
+            const data = {
+                id: document.getElementById('modal_workout_id').value,
+                status: document.getElementById('workout_status').value,
+                dist: document.getElementById('modal_real_dist').value,
+                pace: document.getElementById('modal_real_pace').value,
+                effort: document.querySelector('input[name="effort_level"]:checked').value
+            };
+            await fetch('../src/api/checkin_engine.php', { method: 'POST', body: JSON.stringify(data) });
+            location.reload();
         }
 
-        function toggleFeedbackFields() {
-            const status = document.getElementById('workout_status').value;
-            const fields = document.getElementById('feedback_fields');
-            fields.style.display = (status === 'completed') ? 'block' : 'none';
-        }
-
+        // UI HELPERS (focusDay, switchTab, etc)
         function focusDay(day) {
             document.querySelectorAll('.day-item').forEach(el => el.classList.remove('selected', 'opacity-100'));
-            const targetDay = document.querySelector(`.day-item[data-day="${day}"]`);
-            if(targetDay) targetDay.classList.add('selected');
-
-            document.querySelectorAll('.workout-card').forEach(card => {
-                card.classList.remove('focused');
-                card.classList.add('minimized');
-            });
-            
+            const target = document.querySelector(`.day-item[data-day="${day}"]`);
+            if(target) target.classList.add('selected');
+            document.querySelectorAll('.workout-card').forEach(card => { card.classList.remove('focused'); card.classList.add('minimized'); });
             const selectedCard = document.getElementById(`card-${day}`);
             if(selectedCard) {
-                selectedCard.classList.add('focused');
-                selectedCard.classList.remove('minimized');
-                
-                const container = document.getElementById('app-main');
-                const scrollPos = selectedCard.offsetTop - 15;
-                
-                container.scrollTo({ top: scrollPos, behavior: 'smooth' });
+                selectedCard.classList.add('focused'); selectedCard.classList.remove('minimized');
+                document.getElementById('app-main').scrollTo({ top: selectedCard.offsetTop - 15, behavior: 'smooth' });
             }
         }
 
         function switchTab(id) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('nav button').forEach(b => b.classList.remove('nav-active'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('nav-active', 'text-faf-neon'));
             document.getElementById(id).classList.add('active');
-            const targetBtn = document.getElementById('btn-' + id);
-            if(targetBtn) targetBtn.classList.add('nav-active');
-
+            document.getElementById('btn-' + id).classList.add('nav-active');
             document.getElementById('run-header-extras').style.display = (id === 'home') ? 'block' : 'none';
-            document.getElementById('app-main').scrollTo(0,0);
         }
 
         const syncOrder = async () => {
             const days = Array.from(document.querySelectorAll('.day-item')).map(i => i.getAttribute('data-day'));
-            await fetch('reorder_engine.php', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({week: <?= $current_week ?>, days_order: days}) });
+            await fetch('../src/api/reorder_engine.php', { method: 'POST', body: JSON.stringify({week: <?= $current_week ?>, days_order: days}) });
             location.reload();
         };
 
-        Sortable.create(document.getElementById('days-nav'), { animation: 300, delay: 150, delayOnTouchOnly: true, onEnd: syncOrder });
+        function openAbortModal() { document.getElementById('abort-modal').style.display = 'flex'; }
+        function closeAbortModal() { document.getElementById('abort-modal').style.display = 'none'; }
+        function openCheckIn(id, type, dist) { document.getElementById('modal_workout_id').value = id; document.getElementById('modal_real_dist').value = dist; document.getElementById('feedback-modal').style.display = 'flex'; }
+        function closeCheckIn() { document.getElementById('feedback-modal').style.display = 'none'; }
+        function toggleFeedbackFields() { document.getElementById('feedback_fields').style.display = (document.getElementById('workout_status').value === 'completed') ? 'block' : 'none'; }
+
+        Sortable.create(document.getElementById('days-nav'), { animation: 300, onEnd: syncOrder });
         Sortable.create(document.getElementById('drag-container'), { animation: 400, handle: ".drag-handle", onEnd: syncOrder });
+        document.getElementById('chat-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
     </script>
 </body>
 </html>

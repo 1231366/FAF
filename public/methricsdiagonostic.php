@@ -1,5 +1,7 @@
 <?php 
 session_start(); 
+// Se não houver sessão, volta para o login. 
+// Como este ficheiro está em /public, o login.php está na mesma pasta.
 if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
 ?>
 <!DOCTYPE html>
@@ -32,7 +34,7 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
 </head>
 <body class="antialiased">
 
-    <form id="diag-form" action="save_diagnostic.php" method="POST" style="display:none;">
+    <form id="diag-form" action="../src/api/save_diagnostic.php" method="POST" style="display:none;">
         <input type="hidden" name="weight" id="f-weight">
         <input type="hidden" name="height" id="f-height">
         <input type="hidden" name="age" id="f-age">
@@ -197,26 +199,14 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
         }
 
         function validateStep4() {
-    const dateInput = document.getElementById('in-race-date').value;
-    
-    // Verifica se o campo está vazio
-    if(!dateInput) {
-        return showError("Tens de escolher uma data. O asfalto não espera.");
-    }
-
-    // Criar objetos de data do JavaScript
-    const chosenDate = new Date(dateInput);
-    const today = new Date();
-    
-    // Resetar as horas para comparar apenas os dias
-    today.setHours(0, 0, 0, 0);
-
-    if(chosenDate <= today) {
-        return showError("A prova tem de ser no futuro, campeão!");
-    }
-
-    nextStep();
-}
+            const dateInput = document.getElementById('in-race-date').value;
+            if(!dateInput) return showError("Tens de escolher uma data. O asfalto não espera.");
+            const chosenDate = new Date(dateInput);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if(chosenDate <= today) return showError("A prova tem de ser no futuro, campeão!");
+            nextStep();
+        }
 
         function validateStep5() {
             const tp = document.getElementById('in-target-pace').value;
@@ -285,7 +275,6 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
         function save() {
             if(days.length < 1) return showError("Escolhe pelo menos um dia para treinar!");
             
-            // Sync final data to hidden fields
             document.getElementById('f-weight').value = document.getElementById('in-weight').value;
             document.getElementById('f-height').value = document.getElementById('in-height').value;
             document.getElementById('f-age').value = document.getElementById('v-age').innerText;

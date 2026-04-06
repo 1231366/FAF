@@ -4,15 +4,19 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-session_start();
-require_once 'vendor/autoload.php';
-require_once 'db.php';
+// AJUSTADO: Usa o config centralizado para a ligação à DB e sessão
+require_once __DIR__ . '/../src/core/config.php';
+
+// AJUSTADO: O vendor está na raiz, logo subimos um nível a partir de 'public/'
+require_once __DIR__ . '/../vendor/autoload.php';
 
 $client = new Google_Client();
-// Configurações Oficiais (FAF em maiúsculas conforme o teu diretório no Mac)
-$client->setClientId('35388883787-pco59ltnsthb73c1ho8o4iqafoir9cfu.apps.googleusercontent.com');
-$client->setClientSecret('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');
-$client->setRedirectUri('http://localhost/FAF/google-callback.php');
+// AJUSTADO: Utiliza as constantes definidas no src/core/config.php
+$client->setClientId(GOOGLE_ID);
+$client->setClientSecret(GOOGLE_SECRET);
+
+// AJUSTADO: URL de redirecionamento agora inclui a pasta 'public/' para coincidir com a estrutura
+$client->setRedirectUri('http://localhost/FAF/public/google-callback.php');
 
 if (isset($_GET['code'])) {
     // 2. Trocar o código pelo Token
@@ -35,7 +39,7 @@ if (isset($_GET['code'])) {
     $picture   = $google_account_info->picture; // URL da Foto de Perfil
     $google_id = $google_account_info->id;
 
-    // 4. Verificar se o utilizador já existe
+    // 4. Verificar se o utilizador já existe (Usa $conn vindo do config.php)
     $stmt = $conn->prepare("SELECT id, diagnostic_completed FROM users WHERE email = ?");
     $stmt->bind_param("s", $email);
     $stmt->execute();
@@ -53,7 +57,7 @@ if (isset($_GET['code'])) {
         $_SESSION['user_name'] = $name;
         $_SESSION['user_pic']  = $picture; // Foto para a UI
         
-        // Redirecionamento inteligente
+        // Redirecionamento inteligente baseado no diagnóstico
         if ($user['diagnostic_completed'] == 1) {
             header("Location: plan.php");
         } else {
@@ -63,7 +67,7 @@ if (isset($_GET['code'])) {
         /**
          * UTILIZADOR NOVO: Criar conta com dados do Google
          */
-        $stmt = $conn->prepare("INSERT INTO users (name, email, profile_pic, google_id, password, diagnostic_completed) VALUES (?, ?, ?, ?, NULL, 0)");
+        $stmt = $conn->prepare("INSERT INTO users (name, email, profile_pic, google_id, diagnostic_completed) VALUES (?, ?, ?, ?, 0)");
         $stmt->bind_param("ssss", $name, $email, $picture, $google_id);
         
         if ($stmt->execute()) {
@@ -73,8 +77,7 @@ if (isset($_GET['code'])) {
             
             header("Location: methricsdiagonostic.php");
         } else {
-            // Se chegar aqui, a DB rejeitou o registo (provavelmente falta das colunas)
-            header("Location: login.php?error=database_error_check_columns");
+            header("Location: login.php?error=database_error");
         }
     }
     exit();

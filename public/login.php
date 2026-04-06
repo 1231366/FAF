@@ -3,6 +3,10 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 session_start();
+
+// Carregar configuração para usar as chaves centralizadas
+require_once __DIR__ . '/../src/core/config.php';
+
 // Se já estiver logado, salta o login e vai para o plano
 if(isset($_SESSION['user_id'])) { 
     header("Location: plan.php"); 
@@ -10,12 +14,12 @@ if(isset($_SESSION['user_id'])) {
 }
 
 // INTEGRAÇÃO GOOGLE AUTH
-require_once 'vendor/autoload.php'; // Certifica-te que correstes 'composer require google/apiclient'
+require_once __DIR__ . '/../vendor/autoload.php';
 
 $client = new Google_Client();
-$client->setClientId('35388883787-pco59ltnsthb73c1ho8o4iqafoir9cfu.apps.googleusercontent.com');
-$client->setClientSecret('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');
-$client->setRedirectUri('http://localhost/FAF/google-callback.php');
+$client->setClientId(GOOGLE_ID);
+$client->setClientSecret(GOOGLE_SECRET);
+$client->setRedirectUri('http://localhost/FAF/public/google-callback.php');
 $client->addScope("email");
 $client->addScope("profile");
 
@@ -95,7 +99,7 @@ $google_login_url = $client->createAuthUrl();
             </div>
 
             <section id="login" class="auth-section active">
-                <form action="auth.php" method="POST" class="space-y-4">
+                <form action="../src/core/auth.php" method="POST" class="space-y-4">
                     <input name="email" type="email" placeholder="Email ID" required class="w-full bg-black/40 border-white/5 rounded-2xl p-4 text-sm text-white outline-none focus:ring-0">
                     <div class="space-y-2">
                         <input name="password" type="password" placeholder="Password" required class="w-full bg-black/40 border-white/5 rounded-2xl p-4 text-sm text-white outline-none focus:ring-0">
@@ -113,7 +117,7 @@ $google_login_url = $client->createAuthUrl();
             </section>
 
             <section id="signup" class="auth-section">
-                <form action="register_action.php" method="POST" class="space-y-4">
+                <form action="../src/api/register_action.php" method="POST" class="space-y-4">
                     <input name="name" type="text" placeholder="Nome Completo" required class="w-full bg-black/40 border-white/5 rounded-2xl p-4 text-sm text-white placeholder:text-gray-600 focus:ring-0">
                     <input name="email" type="email" placeholder="Email" required class="w-full bg-black/40 border-white/5 rounded-2xl p-4 text-sm text-white placeholder:text-gray-600 focus:ring-0">
                     <input name="password" type="password" placeholder="Criar Password" required class="w-full bg-black/40 border-white/5 rounded-2xl p-4 text-sm text-white placeholder:text-gray-600 focus:ring-0">
@@ -131,7 +135,7 @@ $google_login_url = $client->createAuthUrl();
                     <h3 class="text-lg font-black text-white italic uppercase tracking-tighter">Recuperar Acesso</h3>
                     <p class="text-[10px] text-gray-500 uppercase tracking-widest leading-relaxed px-4">Enviaremos um link para redefinir a tua password.</p>
                 </div>
-                <form action="recovery_action.php" method="POST" class="space-y-4">
+                <form action="../src/api/recovery_action.php" method="POST" class="space-y-4">
                     <input name="email" type="email" placeholder="O teu email de atleta" required class="w-full bg-black/40 border-white/5 rounded-2xl p-4 text-sm text-white outline-none focus:ring-0">
                     <button type="submit" class="w-full bg-primary py-4 rounded-2xl text-black font-black italic text-base tracking-tighter">ENVIAR LINK</button>
                 </form>
@@ -150,7 +154,7 @@ $google_login_url = $client->createAuthUrl();
             } else {
                 document.getElementById('socialButtons').style.display = 'block';
             }
-        }
+        } 
     </script>
 </body>
 </html>
