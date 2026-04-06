@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>FAF Running - Performance Engineering</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary-fixed": "#c3f400",
+                        "primary-fixed-dim": "#abd600",
+                        "background": "#0e0e0e",
+                        "on-surface": "#e5e2e1",
+                        "on-surface-variant": "#c4c9ac",
+                        "surface-container": "#131313",
+                    },
+                    fontFamily: {
+                        "headline": ["Plus Jakarta Sans"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        html { scroll-behavior: smooth; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .glass-card { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+        .kinetic-glow { box-shadow: 0 0 50px rgba(195, 244, 0, 0.25); }
+        .text-glow { text-shadow: 0 0 30px rgba(195, 244, 0, 0.5); }
+        .dna-gradient { background: linear-gradient(180deg, #c3f400 0%, transparent 100%); }
+        /* Controladores de tamanho das imagens do telemóvel */
+        .mobile-mockup { max-width: 280px; margin: 0 auto; }
+    </style>
+</head>
+
+<body class="bg-background text-on-surface font-body selection:bg-primary-fixed selection:text-black antialiased overflow-x-hidden">
+
+    <header class="fixed top-0 w-full z-50 bg-black/20 backdrop-blur-xl border-b border-white/5 flex justify-between items-center px-6 md:px-12 h-20">
+        <div class="flex items-center gap-2">
+            <span class="text-2xl font-extrabold text-white italic tracking-tighter font-headline">FAF<span class="text-primary-fixed">.</span></span>
+        </div>
+        <div class="flex items-center gap-8">
+            <nav class="hidden md:flex items-center gap-8">
+                <a href="#science" class="text-[10px] font-black tracking-[0.3em] text-on-surface-variant hover:text-primary-fixed transition-colors uppercase">Ciência</a>
+                <a href="#engine" class="text-[10px] font-black tracking-[0.3em] text-on-surface-variant hover:text-primary-fixed transition-colors uppercase">O Motor</a>
+            </nav>
+            <div class="flex items-center gap-6">
+                <a href="login.php" class="text-xs font-bold hover:text-primary-fixed transition-colors uppercase">LOGIN</a>
+                <a href="login.php" class="bg-primary-fixed text-black text-[10px] font-black px-6 py-2.5 rounded-full uppercase tracking-tighter hover:bg-white transition-all">Join the Elite</a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section class="relative min-h-screen w-full flex flex-col justify-center">
+            <div class="absolute inset-0 z-0">
+                <img class="w-full h-full object-cover brightness-50 contrast-125" 
+                     src="https://images.unsplash.com/photo-1452626038306-9aae5e071dd3?q=80&w=2074&auto=format&fit=crop" 
+                     alt="Runner Silhouette">
+                <div class="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent"></div>
+                <div class="absolute inset-0 bg-gradient-to-b from-background/40 via-transparent to-transparent"></div>
+            </div>
+
+            <div class="relative z-10 px-6 md:px-12 pt-32 pb-20 max-w-7xl mx-auto w-full grid lg:grid-cols-2 gap-16 items-center">
+                <div class="flex flex-col items-start space-y-12">
+                    <div class="space-y-4">
+                        <div class="flex items-center gap-3">
+                            <span class="h-[2px] w-10 bg-primary-fixed"></span>
+                            <span class="text-primary-fixed font-label text-[10px] uppercase tracking-[0.5em] font-black">Performance DNA v1.0</span>
+                        </div>
+                        <h1 class="text-7xl md:text-[130px] font-headline font-black italic tracking-tighter leading-[0.8] text-white uppercase">
+                            FAST AS<br/>
+                            <span class="text-primary-fixed text-glow">FUCK.</span>
+                        </h1>
+                    </div>
+
+                    <p class="text-on-surface-variant text-xl md:text-2xl max-w-lg leading-relaxed font-light">
+                        O único treinador que descodifica a tua <span class="text-white font-bold italic">fisiologia real</span> e ajusta o plano de forma dinâmica
+                    </p>
+
+                    <div class="flex flex-col sm:flex-row gap-8 w-full sm:w-auto items-center">
+                        <a href="login.php" class="group relative px-12 py-7 rounded-2xl overflow-hidden transition-all active:scale-95 duration-300 kinetic-glow bg-primary-fixed w-full sm:w-auto text-center">
+                            <span class="relative font-headline font-black text-black tracking-tight text-xl flex items-center justify-center gap-4">
+                                START DIAGNOSTIC
+                                <span class="material-symbols-outlined font-black">arrow_forward</span>
+                            </span>
+                        </a>
+                        
+                        <div class="flex items-center gap-5">
+                            <div class="flex -space-x-4">
+                                <img class="w-12 h-12 rounded-full border-4 border-background object-cover" src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=100&q=80" alt="User">
+                                <img class="w-12 h-12 rounded-full border-4 border-background object-cover" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80" alt="User">
+                                <img class="w-12 h-12 rounded-full border-4 border-background object-cover" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=100&q=80" alt="User">
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-white font-black text-sm tracking-tighter italic">+1,420 ATLETAS</span>
+                                <span class="text-[9px] font-bold tracking-[0.2em] text-primary-fixed uppercase">Performance Optimizada</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-5">
+                    <div class="glass-card border border-white/5 p-8 rounded-[2.5rem] group hover:bg-white/[0.08] transition-all">
+                        <div class="flex items-start gap-6">
+                            <div class="w-14 h-14 rounded-2xl bg-primary-fixed/10 flex items-center justify-center text-primary-fixed">
+                                <span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">biotech</span>
+                            </div>
+                            <div class="space-y-2">
+                                <h3 class="text-white font-bold italic uppercase tracking-tighter text-xl">Adaptatividade Total</h3>
+                                <p class="text-sm text-on-surface-variant leading-relaxed">Fumador ativo? Stress alto? O FAF recalcula os teus paces baseando-se no teu feedback biométrico diário.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-card border border-white/5 p-8 rounded-[2.5rem] group hover:bg-white/[0.08] transition-all">
+                        <div class="flex items-start gap-6">
+                            <div class="w-14 h-14 rounded-2xl bg-primary-fixed/10 flex items-center justify-center text-primary-fixed">
+                                <span class="material-symbols-outlined text-3xl" style="font-variation-settings: 'FILL' 1;">bolt</span>
+                            </div>
+                            <div class="space-y-2">
+                                <h3 class="text-white font-bold italic uppercase tracking-tighter text-xl uppercase">FastAsFuck AI Coach</h3>
+                                <p class="text-sm text-on-surface-variant leading-relaxed">Uma rede neural que analisa os teus paces reais e decide se o plano deve ser castigado ou suavizado.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="science" class="relative py-32 bg-background border-t border-white/5">
+            <div class="max-w-7xl mx-auto px-6 md:px-12">
+                <div class="grid lg:grid-cols-2 gap-24 items-center">
+                    <div class="space-y-16">
+                        <div class="space-y-4">
+                            <span class="text-primary-fixed font-black text-[10px] tracking-[0.4em] uppercase italic">O Loop Neural</span>
+                            <h2 class="text-5xl md:text-7xl font-headline font-black italic tracking-tighter text-white leading-none uppercase">Plano Vivo.</h2>
+                            <p class="text-on-surface-variant text-lg leading-relaxed max-w-md italic">O FAF não é uma tabela fixa. É um ciclo de feedback constante entre o asfalto e o algoritmo.</p>
+                        </div>
+                        <div class="grid gap-8">
+                            <div class="flex gap-6">
+                                <div class="text-primary-fixed font-black italic text-4xl opacity-20">01</div>
+                                <div>
+                                    <h5 class="text-white font-bold uppercase tracking-widest text-xs mb-2 italic">Input de Dados Reais</h5>
+                                    <p class="text-sm text-on-surface-variant">Regista os teus KM e Pace após cada missão. O sistema descarta o planeado e abraça o executado.</p>
+                                </div>
+                            </div>
+                            <div class="flex gap-6">
+                                <div class="text-primary-fixed font-black italic text-4xl opacity-20">02</div>
+                                <div>
+                                    <h5 class="text-white font-bold uppercase tracking-widest text-xs mb-2 italic">Análise de Tendência</h5>
+                                    <p class="text-sm text-on-surface-variant">Se marcares "Fácil" ou "Difícil" consecutivamente, o motor recalibra todos os teus paces futuros automaticamente.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="relative group flex justify-center">
+                        <div class="absolute inset-0 bg-primary-fixed/20 blur-[100px] opacity-30"></div>
+                        <img src="img/feedback_preview.png" alt="Feedback Loop UI" class="mobile-mockup relative glass-card border border-white/10 rounded-[3rem] shadow-2xl transition-transform group-hover:scale-105 duration-500">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="engine" class="relative py-32 bg-background overflow-hidden border-t border-white/5">
+            <div class="max-w-7xl mx-auto px-6 md:px-12 relative z-10 text-center">
+                <div class="mb-24 space-y-4">
+                    <span class="text-primary-fixed font-black text-[10px] tracking-[0.5em] uppercase italic text-glow">The Neural Engine</span>
+                    <h2 class="text-5xl md:text-8xl font-headline font-black italic tracking-tighter text-white uppercase leading-none">Bio-Sincronização.</h2>
+                </div>
+                
+                <div class="grid md:grid-cols-2 gap-20 items-center">
+                    <div class="flex justify-center order-2 md:order-1">
+                        <img src="img/coach_chat_preview.png" alt="AI Coach Interface" class="mobile-mockup rounded-[3rem] border border-white/5 shadow-2xl">
+                    </div>
+                    <div class="text-left space-y-8 order-1 md:order-2">
+                        <h4 class="text-4xl font-black italic text-white uppercase tracking-tighter">Neural Coach AI</h4>
+                        <p class="text-on-surface-variant leading-relaxed text-lg">Esquece os planos estáticos. Fala com a IA. Ela sabe se o teu peso mudou, se o teu último treino foi elite e ajusta a carga de amanhã em segundos.</p>
+                        <ul class="space-y-4">
+                            <li class="flex items-center gap-3 text-sm font-bold uppercase italic"><span class="material-symbols-outlined text-primary-fixed fill-1">check_circle</span> Ajuste Dinâmico de Pace</li>
+                            <li class="flex items-center gap-3 text-sm font-bold uppercase italic"><span class="material-symbols-outlined text-primary-fixed fill-1">check_circle</span> Reagendamento Inteligente</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="py-20 px-6 border-t border-white/5 text-center bg-black">
+        <p class="text-[10px] font-black tracking-[0.5em] text-white/20 uppercase italic">Built for the Elite Performance Lab — 2026</p>
+    </footer>
+
+</body>
+</html>
