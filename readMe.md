@@ -1,97 +1,101 @@
-# 🧬 FAF Running: The Scientific Kernel & Technical Manual (v1.0)
-> **Motto:** "Elite Physiology. Zero Bullshit. Fast As Fuck."
+# 🧬 FAF Running: Neural Performance Engine
 
-Este documento serve como a especificação técnica oficial para o motor de treino adaptativo do **FAF Running**. Ao contrário de apps genéricas, o FAF utiliza um modelo de **Autorregulação Biológica** para ajustar o treino em tempo real.
+> **"Elite Physiology. Zero Bullshit. Fast As Fuck."**
 
----
+![FAF Banner](https://img.shields.io/badge/Architecture-Neural--Adaptative-c3f400?style=for-the-badge&logo=cpu)
+![PHP](https://img.shields.io/badge/Backend-PHP%208.2-777BB4?style=for-the-badge&logo=php)
+![AI](https://img.shields.io/badge/AI-Llama%203.3%20(Groq)-orange?style=for-the-badge&logo=meta)
+![UI](https://img.shields.io/badge/UI-Glassmorphism-black?style=for-the-badge&logo=tailwind-css)
 
-## 1. Mapeamento de Perfis (The DNA Matrix)
-
-O algoritmo classifica o utilizador em eixos multidimensionais para evitar o erro do "treino médio".
-
-### A. Fenótipos Musculares (Recrutamento de Fibras)
-| Perfil | Bio-assinatura | Estratégia FAF |
-| :--- | :--- | :--- |
-| **Explosive Sprinter** | VAM alta / Decaimento >15% após 3km. | Foco em capilarização (Z2) e intervalos longos. |
-| **Endurance Diesel** | VAM baixa / Ritmo constante 10km+. | Foco em recrutamento neuromuscular (Sprints/Subidas). |
-| **Balanced Athlete** | Progressão linear em todas as distâncias. | Periodização clássica (Base -> Construção -> Pico). |
-
-### B. Variáveis Bio-Sociais
-* **Active Smoker:** Fator de correção de $V_O2$ (Redução de 3-5% no limiar). Rácio de descanso em intervalos aumentado para 1:1.5 ou 1:2.
-* **High-Cortisol User:** Identificado por HRV baixo ou RPE alto em repouso. O sistema converte treinos de Z4 em Z2 para proteção do sistema imunitário.
-* **Cycle Syncing (Feminino):** * *Fase Folicular:* Máxima carga e intensidade.
-    * *Fase Lútea:* Redução de volume em 15% e aumento de hidratação programada.
+**Live Demo:** [faf-running.tiagosilva.org](https://fastasfuck.tiagosilva.org)  
+*(Nota: Neural Coach funcional em ambiente local; em produção requer hosting com suporte a cURL externo)*
 
 ---
 
-## 2. Zonas de Intensidade FAF (The Paces)
+## 🏗️ Stack Tecnológica
 
-Baseado no **Pace de Referência ($P_{ref}$)** (Tempo atual de 5km).
-
-| Zona | Nome | Intensidade | Fisiologia Aplicada |
-| :--- | :--- | :--- | :--- |
-| **Z1** | **Recovery** | > 130% $P_{ref}$ | Lavagem de lactato e regeneração ativa. |
-| **Z2** | **$P_{base}$** | 115% - 125% | Biogénese mitocondrial. Onde se ganha "caixa". |
-| **Z3** | **Tempo** | 105% - 110% | Eficiência metabólica (mistura gordura/glicogénio). |
-| **Z4** | **Threshold** | 98% - 102% | Expansão do Limiar de Lactato. Velocidade de cruzeiro. |
-| **Z5** | **FAF Speed** | 90% - 95% | $V_O2$ Máximo. Recrutamento de fibras tipo II. |
+| Camada | Tecnologia |
+|--------|------------|
+| **Frontend** | HTML5 + Tailwind CSS + SortableJS |
+| **Backend** | PHP 8.2 (Pure Vanilla - Zero Frameworks) |
+| **AI Engine** | Llama 3.3 70B via Groq API (Inference < 1s) |
+| **Database** | MySQL |
+| **Auth** | Google OAuth 2.0 |
 
 ---
 
-## 3. Algoritmo de Progressão e Carga (ACWR)
+## 🎯 O Problema & A Solução
 
-O FAF utiliza o **Acute:Chronic Workload Ratio (ACWR)** para prever lesões.
-
-1.  **Carga Aguda (7 dias):** Soma do esforço da última semana.
-2.  **Carga Crónica (28 dias):** Média das últimas 4 semanas.
-3.  **The Sweet Spot:** O rácio entre Aguda/Crónica deve manter-se entre **0.8 e 1.3**. 
-    * *Se ACWR > 1.5:* **RISCO DE LESÃO ALTO.** O app bloqueia treinos de impacto.
-
-### Regras de Ouro:
-* **Aumento de Volume:** Máximo 10% por semana.
-* **Semana de Deload:** Cada 4ª semana tem redução de 30% em kms para permitir supercompensação.
+O mercado está inundado de apps de corrida com planos estáticos e caros (Runna, Strava Premium). O **FAF Running** introduz o conceito de **Autorregulação Biológica**: um sistema que reage ao desempenho real, peso e nível de fadiga, utilizando IA para ajustar o protocolo de treino em tempo real.
 
 ---
 
-## 4. O Ciclo de Feedback (Real-Time Adaptation)
+## 🎬 Demonstração Visual (UI aesthetic optimized)
 
-O plano reescreve-se após cada treino baseado no **RPE (Rate of Perceived Exertion)**.
+<div align="left">
 
-### Matriz de Reajuste:
-* **RPE 9-10 (Inesperado):** O algoritmo assume fadiga acumulada. Reduz o volume do próximo treino em 20%.
-* **RPE < 4 (Em treino de intensidade):** O algoritmo assume evolução. Aumenta os paces alvo em 2% para a semana seguinte.
-* **Feedback "Falta de Ar" (Fumadores/Asmáticos):** O sistema não mexe na velocidade, mas insere **pausas de micro-recuperação** no meio de séries longas.
+### 1. Diagnóstico e DNA do Atleta
+Geração de plano baseada em biometria real: idade, peso, histórico de fumador e volume atual.
+<br>
+<img src="./img/perguntasplano.gif" alt="Onboarding Process" width="350" style="border-radius: 20px; border: 1px solid rgba(195,244,0,0.2); box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 10px;">
 
----
+<br><br>
 
-## 5. Estrutura de Treino Semanal (Native App View)
+### 2. Neural Coach (Interface Imersiva)
+Interação direta com o Llama 3.3. O Coach analisa desvios de pace e sugere modelos de sapatilhas baseados no teu IMC e budget.
+<br>
+<img src="./img/chatbot.gif" alt="Neural Coach Chat" width="350" style="border-radius: 20px; border: 1px solid rgba(195,244,0,0.2); box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 10px;">
 
-O ecrã do utilizador apresenta 3 pilares:
+<br><br>
 
-### I. Corrida (The Mission)
-* Visualização clara de kms, pace e **porquê** técnico (Ex: *"Este treino ensina o teu corpo a reciclar o lactato como combustível"*).
+### 3. Gestão e Reordenação Neural
+Feedback de treinos com análise de RPE e reordenação da semana via Drag & Drop (AJAX Sync).
+<br>
 
-### II. Força em Casa (FAF Strong)
-* **Sprinter:** Treinos de resistência muscular (muitas reps, pouco peso).
-* **Diesel:** Pliometria e explosão (saltos, saltos de caixa).
-* **Fumador:** Treinos de mobilidade torácica para melhorar a expansão pulmonar.
-
-### III. Recovery & Wellness
-* Sugestões de sono e hidratação baseadas na intensidade do dia anterior.
+</div>
 
 ---
 
-## 6. Implementação de Dados (Exemplo JSON)
+## 🧠 O Kernel Fisiológico (The Math)
 
-```json
-{
-  "workout_engine": {
-    "calculation_method": "Modified_Jack_Daniels_VDOT",
-    "adaptation_trigger": "Post_Run_RPE",
-    "safety_layer": "ACWR_1.3_Limit"
-  },
-  "adjustments": {
-    "smoker_correction": -0.05,
-    "recovery_buffer_hours": 36
-  }
-}
+O motor do FAF não usa "ifs" genéricos, usa ciência:
+
+### 🧪 VDOT (Jack Daniels Formula)
+Cálculo de zonas de intensidade precisas (Easy, Threshold, Interval) baseadas no consumo de oxigénio do atleta.
+
+### 📉 ACWR (Prevenção de Lesões)
+Monitorização do rácio de carga (Aguda vs Crónica). Se o ACWR ultrapassar **1.5**, o Coach ativa o "Safe Mode" para evitar fraturas de stress e sobrecarga.
+
+### ⚡ RPE-Matrix (Autorregulação)
+Se o utilizador falha o pace alvo (ex: 5:15 vs 4:42) com esforço elevado, o sistema identifica fadiga neuromuscular e recalcula o volume da semana seguinte.
+
+---
+
+## 🗺️ Roadmap de Evolução
+
+### Fase 1: Infraestrutura & Segurança 🔒
+* **Migração de Hosting:** Sair de ambientes restritos para VPS (DigitalOcean) para total conectividade de IA.
+* **Auth Core:** Sistema de confirmação de email e recuperação de password nativa.
+
+### Fase 2: Social Syndicate (The Circle) 🛡️
+* **Circles/Clãs:** Grupos de treino fechados com ranking interno.
+* **Team Flame:** Uma chama de equipa inspirada em streaks. Se o clã cumpre o plano, a chama brilha; se alguém falhar, a chama esvanece (Responsabilidade Social).
+* **Syndicate Feed:** Mural de atividades para motivação e cobrança entre membros.
+
+### Fase 3: Deep Integration ⌚
+* **Sync com Garmin/Strava:** Importação automática de atividades via API.
+* **Análise de Segmentos:** O Coach analisará parciais de intervalos para detetar quebras de resistência específicas.
+
+---
+
+## 📁 Estrutura do Projeto
+
+```text
+faf-running/
+├── public/                 # Interface (plan.php, login.php)
+├── src/
+│   ├── api/                # Endpoints (checkin, reorder, check)
+│   ├── core/               # Configuração e Base de Dados
+│   └── engines/            # Kernel VDOT e AI Engine
+├── img/                    # Assets e GIFs Otimizados
+└── vendor/                 # Google & Groq SDKs
