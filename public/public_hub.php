@@ -18,6 +18,11 @@ $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $userData = $stmt->get_result()->fetch_assoc();
 
+// Sincroniza a sessão com a DB para evitar que o estado antigo bloqueie a interface
+if (isset($userData['circle_id'])) {
+    $_SESSION['circle_id'] = $userData['circle_id'];
+}
+
 /**
  * 2. IDENTITY LAYER
  */
@@ -30,7 +35,7 @@ $first_name = explode(' ', $userName)[0];
  */
 $circle_energy = 0; $circle_name = "Solo Protocol"; $streak = 0;
 $clan_members = [];
-if ($userData['circle_id']) {
+if (!empty($userData['circle_id'])) {
     $c_id = $userData['circle_id'];
     $stmt_c = $conn->prepare("SELECT name, streak_count FROM circles WHERE id = ?");
     $stmt_c->bind_param("i", $c_id);
@@ -296,7 +301,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             </div>
 
             <div id="club-circle-hub" class="hidden space-y-6">
-                <?php if($userData['circle_id']): ?>
+                <?php if(!empty($userData['circle_id'])): ?>
                     <div class="bg-faf-neon p-7 rounded-[45px] text-black shadow-2xl flex justify-between items-center"><div><h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter"><?= $circle_name ?></h3><p class="text-[9px] font-black uppercase tracking-widest opacity-60">Clan Sync Active</p></div><div class="text-center text-3xl">🔥 <span class="block text-xl font-black"><?= $streak ?></span></div></div>
                     
                     <button onclick="shareRecruit()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl text-[10px] font-black uppercase italic flex items-center justify-center gap-2">

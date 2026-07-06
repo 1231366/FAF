@@ -28,9 +28,14 @@ $first_name = explode(' ', $userName)[0];
  * 3. ENGINE LAYER
  */
 $current_week = isset($_GET['week']) ? (int)$_GET['week'] : 1;
+$total_cycle_weeks = (int)($userData['prep_cycle'] ?? 12);
+
+// SEGURANÇA: Impede navegação para semanas inexistentes
+if ($current_week < 1) { header("Location: ?week=1"); exit(); }
+if ($current_week > $total_cycle_weeks) { header("Location: ?week=" . $total_cycle_weeks); exit(); }
+
 require_once __DIR__ . '/../src/engines/kernel_engine.php'; 
 
-$total_cycle_weeks = (int)($userData['prep_cycle'] ?? 12);
 $volume_total = 0;
 $ordem_dias = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'];
 if (isset($weekly_workouts)) {
@@ -49,14 +54,14 @@ foreach($ordem_dias as $d) {
 }
 
 $workout_hoje = $weekly_workouts[$hoje_nome] ?? null;
-$coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca no ritmo e na consistência." : "Hey $first_name! Hoje o asfalto descansa. Recuperação neural é onde o músculo cresce.";
+$coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca no ritmo." : "Hey $first_name! Hoje o asfalto descansa.";
 ?>
 <!DOCTYPE html>
 <html class="dark" lang="pt">
 <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
-    <title>FAF Neural - Final Master Build</title>
+    <title>FAF Neural - Performance Engine</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-25..0" />
@@ -67,18 +72,28 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     <style>
         :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
         body { background-color: #000; color: #fff; font-family: 'Inter', sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        
+        /* ANIMAÇÃO DE ROTAÇÃO RESTRITA À BARRA DO CALENDÁRIO */
+        .week-rotate-anim { animation: barRotate 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes barRotate { 
+            0% { opacity: 0; transform: scaleX(0.9) translateY(5px); }
+            100% { opacity: 1; transform: scaleX(1) translateY(0); }
+        }
+
         .glass-card { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.05); }
         header { flex-shrink: 0; z-index: 500; }
         main { flex-grow: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; scroll-behavior: smooth; position: relative; }
         .tab-content { display: none; }
         .tab-content.active { display: block; animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
         .workout-stack { display: flex; flex-direction: column; gap: -45px; padding-bottom: 180px; padding-top: 20px; }
         .workout-card { transition: all 0.5s cubic-bezier(0.2, 1, 0.3, 1); position: relative; }
         .workout-card.focused { transform: scale(1.05) translateY(-10px); z-index: 100 !important; opacity: 1 !important; }
         .workout-card.focused .glass-card { border-color: rgba(195, 244, 0, 0.5); box-shadow: 0 30px 60px rgba(0,0,0,0.9); }
         .workout-card.minimized { opacity: 0.4; transform: scale(0.95); }
-        .day-item { touch-action: pan-x; -webkit-user-select: none; user-select: none; }
+        
+        .day-item { touch-action: pan-y; -webkit-user-select: none; user-select: none; }
         .day-item.selected { color: #c3f400; transform: scale(1.15); }
         .day-item.selected .dot { background: #c3f400; box-shadow: 0 0 10px #c3f400; }
         ::-webkit-scrollbar { display: none; }
@@ -86,7 +101,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         .drag-handle { cursor: grab; }
         #abort-modal, #feedback-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
 
-        /* Estilos do Coach Flutuante */
+        /* Coach Overlay */
         #coach-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); z-index: 4000; align-items: center; justify-content: center; padding: 20px; }
         #coach-modal-chat { width: 100%; max-width: 420px; height: 70vh; background: #0d0d0d; border: 1px solid rgba(195,244,0,0.15); border-radius: 35px; display: flex; flex-direction: column; overflow: hidden; }
         #coach-overlay.active { display: flex; animation: sheetUp 0.4s cubic-bezier(0.2, 1, 0.3, 1) forwards; }
@@ -100,7 +115,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     <header class="pt-[var(--safe-top)] px-6 bg-black border-b border-white/5">
         <div class="py-4 flex justify-between items-center">
             <div class="flex items-center gap-3">
-                <img src="<?= $userPic ?>" class="w-9 h-9 rounded-full border border-faf-neon/30 object-cover" referrerpolicy="no-referrer" onerror="this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'">
+                <img src="<?= $userPic ?>" class="w-9 h-9 rounded-full border border-faf-neon/30 object-cover" referrerpolicy="no-referrer">
                 <h1 class="text-xl font-headline font-black italic uppercase tracking-tighter">FAF<span class="text-faf-neon">.</span></h1>
             </div>
             <span onclick="switchTab('profile')" class="material-symbols-outlined text-faf-neon text-2xl cursor-pointer">settings</span>
@@ -129,16 +144,22 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <p class="text-[10px] text-white/70 italic leading-tight">"<?= $coach_msg ?>"</p>
             </div>
 
-            <section id="days-nav" class="flex justify-between items-center bg-zinc-900/60 p-4 rounded-[24px] border border-white/5 shadow-2xl">
-                <?php foreach($ordem_dias as $d): 
-                    $hasW = isset($weekly_workouts[$d]);
-                    $isH = ($d == $hoje_nome);
-                ?>
-                <div onclick="focusDay('<?= $d ?>')" data-day="<?= $d ?>" class="day-item flex flex-col items-center gap-1 cursor-pointer transition-all duration-300 <?= $isH ? 'selected' : 'opacity-30' ?>">
-                    <span class="text-[9px] font-black uppercase"><?= $d ?></span>
-                    <div class="dot w-1.5 h-1.5 rounded-full <?= $hasW ? 'bg-white shadow-[0_0_5px_white]' : 'bg-transparent border border-white/20' ?>"></div>
+            <section id="swipe-area" class="bg-zinc-900/60 p-4 rounded-[24px] border border-white/5 shadow-2xl flex items-center gap-2 week-rotate-anim">
+                <button onclick="changeWeek(-1)" class="text-faf-neon/40 font-black text-xl select-none px-2 active:scale-150 transition-all <?= $current_week <= 1 ? 'invisible' : '' ?>">&lt;</button>
+                
+                <div id="days-nav" class="flex-1 flex justify-between items-center">
+                    <?php foreach($ordem_dias as $d): 
+                        $hasW = isset($weekly_workouts[$d]);
+                        $isH = ($d == $hoje_nome);
+                    ?>
+                    <div onclick="focusDay('<?= $d ?>')" data-day="<?= $d ?>" class="day-item flex flex-col items-center gap-1 cursor-pointer transition-all duration-300 <?= $isH ? 'selected' : 'opacity-30' ?>">
+                        <span class="text-[9px] font-black uppercase"><?= $d ?></span>
+                        <div class="dot w-1.5 h-1.5 rounded-full <?= $hasW ? 'bg-white shadow-[0_0_5px_white]' : 'bg-transparent border border-white/20' ?>"></div>
+                    </div>
+                    <?php endforeach; ?>
                 </div>
-                <?php endforeach; ?>
+
+                <button onclick="changeWeek(1)" class="text-faf-neon/40 font-black text-xl select-none px-2 active:scale-150 transition-all <?= $current_week >= $total_cycle_weeks ? 'invisible' : '' ?>">&gt;</button>
             </section>
         </div>
     </header>
@@ -148,10 +169,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         <div id="home" class="tab-content active">
             <div class="flex justify-between items-end px-2 pb-4">
                 <p class="text-[10px] font-black text-white/30 uppercase tracking-widest italic">Week <?= $current_week ?> • <?= number_format($volume_total, 1) ?> KM</p>
-                <div class="flex gap-4">
-                    <a href="?week=<?= $current_week - 1 ?>" class="text-white/20"><span class="material-symbols-outlined">west</span></a>
-                    <a href="?week=<?= $current_week + 1 ?>" class="text-faf-neon"><span class="material-symbols-outlined">east</span></a>
-                </div>
+                <div class="flex items-center gap-1 opacity-20"><span class="material-symbols-outlined text-[10px]">swipe_left</span><p class="text-[8px] font-black uppercase italic">Swipe Calendar</p></div>
             </div>
 
             <div id="drag-container" class="workout-stack">
@@ -170,42 +188,16 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <div data-day="<?= $dia ?>" id="card-<?= $dia ?>" class="workout-card <?= $isTarget ? 'focused' : 'minimized' ?>" style="z-index: <?= 50 - $idx ?>;" onclick="focusDay('<?= $dia ?>')">
                     <div class="glass-card rounded-[40px] p-7 shadow-2xl relative overflow-hidden">
                         <div class="flex justify-between items-start mb-4">
-                            <div>
-                                <p class="text-[11px] font-black uppercase text-faf-neon italic tracking-widest mb-1"><?= $dia ?></p>
-                                <h4 class="text-3xl font-headline font-black italic uppercase leading-none"><?= $w['workout_type'] ?></h4>
-                            </div>
-                            <div class="drag-handle w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-                                <span class="material-symbols-outlined text-faf-neon text-2xl"><?= $icon ?></span>
-                            </div>
+                            <div><p class="text-[11px] font-black uppercase text-faf-neon italic tracking-widest mb-1"><?= $dia ?></p><h4 class="text-3xl font-headline font-black italic uppercase leading-none"><?= $w['workout_type'] ?></h4></div>
+                            <div class="drag-handle w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center"><span class="material-symbols-outlined text-faf-neon text-2xl"><?= $icon ?></span></div>
                         </div>
-
-                        <div class="mb-6">
-                            <p class="text-[10px] text-white/50 font-medium leading-relaxed italic">
-                                <?= !empty($w['description']) ? $w['description'] : 'Foco na manutenção aeróbica.' ?>
-                            </p>
-                        </div>
-
-                        <?php if($concluido): ?>
-                        <div class="bg-faf-neon/5 border border-faf-neon/20 rounded-3xl p-4 mb-6 grid grid-cols-2 gap-4">
-                            <div>
-                                <p class="text-[8px] font-black text-white/20 uppercase italic mb-1">Target Mission</p>
-                                <p class="text-xs font-black text-white/60 italic"><?= number_format($w['distance'], 1) ?>k @ <?= $w['pace'] ?></p>
-                            </div>
-                            <div class="border-l border-white/10 pl-4">
-                                <p class="text-[8px] font-black text-faf-neon uppercase italic mb-1">Actual Result</p>
-                                <p class="text-xs font-black text-faf-neon italic"><?= number_format($w['real_distance'], 1) ?>k @ <?= $w['real_pace'] ?></p>
-                            </div>
-                        </div>
-                        <?php endif; ?>
-
+                        <div class="mb-6"><p class="text-[10px] text-white/50 font-medium leading-relaxed italic"><?= !empty($w['description']) ? $w['description'] : 'Foco na manutenção aeróbica.' ?></p></div>
                         <div class="flex justify-between items-center">
                             <div class="flex gap-6">
                                 <div><p class="text-[9px] text-white/30 uppercase font-black italic">Distância</p><p class="text-xl font-black italic"><?= number_format($w['distance'] ?? 0, 1) ?>k</p></div>
                                 <div><p class="text-[9px] text-white/30 uppercase font-black italic">Target</p><p class="text-xl font-black italic text-faf-neon"><?= $w['pace'] ?? '0:00' ?></p></div>
                             </div>
-                            <?php if(!$concluido): ?>
-                                <button onclick="openCheckIn(<?= $w['id'] ?>, '<?= $w['workout_type'] ?>', '<?= $w['distance'] ?>')" class="bg-faf-neon text-black font-black uppercase px-6 py-3 rounded-2xl text-[10px] italic shadow-lg active:scale-90 transition-all">Feedback</button>
-                            <?php endif; ?>
+                            <?php if(!$concluido): ?><button onclick="openCheckIn(<?= $w['id'] ?>, '<?= $w['workout_type'] ?>', '<?= $w['distance'] ?>')" class="bg-faf-neon text-black font-black uppercase px-6 py-3 rounded-2xl text-[10px] italic shadow-lg active:scale-90 transition-all">Feedback</button><?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -230,9 +222,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         </div>
 
         <div id="profile" class="tab-content space-y-8 text-center pt-8">
-            <div class="relative w-32 h-32 mx-auto">
-                <img src="<?= $userPic ?>" class="w-full h-full rounded-full border-4 border-faf-neon p-1 bg-zinc-900 shadow-2xl object-cover" referrerpolicy="no-referrer">
-            </div>
+            <div class="relative w-32 h-32 mx-auto"><img src="<?= $userPic ?>" class="w-full h-full rounded-full border-4 border-faf-neon p-1 bg-zinc-900 shadow-2xl object-cover"></div>
             <h3 class="text-3xl font-headline font-black italic uppercase italic tracking-tighter"><?= $userName ?></h3>
             <div class="grid grid-cols-3 gap-3 px-4">
                 <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Peso</p><p class="text-xl font-black italic"><?= $userData['weight'] ?? '--' ?>kg</p></div>
@@ -240,16 +230,18 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Alvo</p><p class="text-xl font-black italic"><?= $userData['target_distance'] ?? '--' ?>k</p></div>
             </div>
 
-            <div class="mt-8 px-4">
-                <div class="glass-card p-6 rounded-[40px] border-l-4 border-red-600/50 text-left">
+            <div class="mt-8 px-4 space-y-4 text-left">
+                <div class="glass-card p-6 rounded-[40px] border-l-4 border-red-600/50">
                     <p class="text-[10px] font-black uppercase text-red-500 mb-1 tracking-widest">Danger Zone</p>
-                    <h4 class="text-xl font-headline font-black italic uppercase italic tracking-tighter mb-2">Abort Protocol</h4>
-                    <p class="text-[10px] text-white/40 mb-6 italic leading-relaxed">Se desativares este protocolo, todos os treinos e progressos atuais serão incinerados.</p>
-                    <button onclick="openAbortModal()" class="w-full py-4 bg-red-600/10 border border-red-600/20 rounded-2xl text-[10px] font-black uppercase italic tracking-widest text-red-500 active:bg-red-600 active:text-white transition-all">Incinerar Plano Atual</button>
+                    <h4 class="text-xl font-headline font-black italic uppercase tracking-tighter mb-4">Protocol Actions</h4>
+                    
+                    <button onclick="openAbortModal()" class="w-full py-4 bg-red-600/10 border border-red-600/20 rounded-2xl text-[10px] font-black uppercase italic tracking-widest text-red-500 mb-4 active:bg-red-600 active:text-white transition-all">Incinerar Plano Atual</button>
+                    
+                    <a href="logout.php" class="flex items-center justify-center w-full py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase italic tracking-widest text-white/50 active:bg-white active:text-black transition-all">
+                        <span class="material-symbols-outlined mr-2 text-sm">logout</span> Terminar Sessão
+                    </a>
                 </div>
             </div>
-
-            <a href="logout.php" class="inline-block mt-8 text-red-500 font-black uppercase text-[10px] tracking-widest italic underline">Logout</a>
         </div>
     </main>
 
@@ -258,20 +250,15 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             <header class="p-6 border-b border-white/5 flex justify-between items-center bg-black/40">
                 <div class="flex items-center gap-3">
                     <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=CoachK" class="w-10 h-10 rounded-full border border-faf-neon/30">
-                    <div>
-                        <h3 class="font-headline font-black italic uppercase text-faf-neon text-sm">Coach Neural</h3>
-                        <span class="text-[8px] text-white/30 uppercase font-black">Bio-Sincronização Ativa</span>
-                    </div>
+                    <div><h3 class="font-headline font-black italic uppercase text-faf-neon text-sm">Coach Neural</h3><span class="text-[8px] text-white/30 uppercase font-black">Bio-Sincronização Ativa</span></div>
                 </div>
                 <button onclick="closeCoachChat()" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40"><span class="material-symbols-outlined text-sm">close</span></button>
             </header>
-            <div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-4 flex flex-col">
-                <div class="coach-bubble italic">Boas, <?= $first_name ?>. Como te posso ajudar?</div>
-            </div>
+            <div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-4 flex flex-col"><div class="coach-bubble italic">Boas, <?= $first_name ?>. Como te posso ajudar?</div></div>
             <div class="p-6 bg-black">
                 <div class="glass-card p-1.5 rounded-[28px] flex items-center gap-2 border-faf-neon/20 focus-within:border-faf-neon transition-all">
-                    <input id="chat-input" type="text" placeholder="Reportar treino..." class="flex-1 bg-transparent border-none focus:ring-0 text-sm p-3 text-white placeholder:text-white/20">
-                    <button onclick="sendMessage()" class="w-11 h-11 rounded-2xl bg-faf-neon text-black flex items-center justify-center active:scale-90 transition-all"><span class="material-symbols-outlined font-black">send</span></button>
+                    <input id="chat-input" type="text" placeholder="Reportar treino..." class="flex-1 bg-transparent border-none focus:ring-0 text-sm p-3 text-white">
+                    <button onclick="sendMessage()" class="w-11 h-11 rounded-2xl bg-faf-neon text-black flex items-center justify-center"><span class="material-symbols-outlined font-black">send</span></button>
                 </div>
             </div>
         </div>
@@ -280,12 +267,9 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     <div id="abort-modal">
         <div class="glass-card p-10 rounded-[50px] border border-red-600/30 max-w-sm w-full text-center space-y-8">
             <span class="material-symbols-outlined text-red-600 text-6xl">warning</span>
-            <div>
-                <h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter text-white mb-2">Neural Reset</h3>
-                <p class="text-xs text-white/40 italic leading-relaxed">Confirmas a destruição total do protocolo atual? Esta ação é irreversível.</p>
-            </div>
+            <div><h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter text-white mb-2">Neural Reset</h3><p class="text-xs text-white/40 italic">Confirmas a destruição total do protocolo atual? Esta ação é irreversível.</p></div>
             <div class="space-y-3">
-                <button onclick="window.location.href='../src/api/abort_engine.php'" class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-[0_10px_20px_rgba(220,38,38,0.2)]">Confirmar Incineração</button>
+                <button onclick="window.location.href='../src/api/abort_engine.php'" class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Confirmar Incineração</button>
                 <button onclick="closeAbortModal()" class="w-full py-5 bg-white/5 text-white/40 rounded-2xl font-black uppercase italic text-xs tracking-widest">Cancelar</button>
             </div>
         </div>
@@ -294,94 +278,84 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     <div id="feedback-modal">
         <div class="glass-card p-8 rounded-[50px] border border-faf-neon/20 max-w-sm w-full space-y-6">
             <input type="hidden" id="modal_workout_id">
-            <div class="flex justify-between items-center">
-                <h3 class="text-xl font-headline font-black italic uppercase italic text-faf-neon">Workout Feedback</h3>
-                <span onclick="closeCheckIn()" class="material-symbols-outlined text-white/20 cursor-pointer">close</span>
-            </div>
-            <select id="workout_status" onchange="toggleFeedbackFields()" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black uppercase italic outline-none text-white">
-                <option value="completed">TREINO CONCLUÍDO</option>
-                <option value="skipped">NÃO CONSEGUI FAZER</option>
-            </select>
+            <div class="flex justify-between items-center"><h3 class="text-xl font-headline font-black italic uppercase italic text-faf-neon">Workout Feedback</h3><span onclick="closeCheckIn()" class="material-symbols-outlined text-white/20 cursor-pointer">close</span></div>
+            <select id="workout_status" onchange="toggleFeedbackFields()" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black uppercase italic outline-none text-white"><option value="completed">TREINO CONCLUÍDO</option><option value="skipped">NÃO CONSEGUI FAZER</option></select>
             <div id="feedback_fields" class="space-y-4">
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="space-y-1">
-                        <label class="text-[9px] font-black uppercase text-white/30 ml-2 italic">Real KM</label>
-                        <input type="number" step="0.01" id="modal_real_dist" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none focus:border-faf-neon transition-all">
-                    </div>
-                    <div class="space-y-1">
-                        <label class="text-[9px] font-black uppercase text-white/30 ml-2 italic">Real Pace</label>
-                        <input type="text" id="modal_real_pace" placeholder="5:30" class="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none focus:border-faf-neon transition-all">
-                    </div>
-                </div>
-                <div class="space-y-1">
-                    <label class="text-[9px] font-black uppercase text-white/30 ml-2 italic">Esforço Sentido</label>
-                    <div class="grid grid-cols-3 gap-2">
-                        <label class="cursor-pointer">
-                            <input type="radio" name="effort_level" value="easy" class="hidden peer">
-                            <div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-green-500/20 peer-checked:border-green-500 transition-all uppercase">Easy</div>
-                        </label>
-                        <label class="cursor-pointer">
-                            <input type="radio" name="effort_level" value="perfect" checked class="hidden peer">
-                            <div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-faf-neon/20 peer-checked:border-faf-neon transition-all uppercase text-faf-neon">Perfect</div>
-                        </label>
-                        <label class="cursor-pointer">
-                            <input type="radio" name="effort_level" value="hard" class="hidden peer">
-                            <div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-red-500/20 peer-checked:border-red-500 transition-all uppercase text-red-500">Hard</div>
-                        </label>
-                    </div>
+                <div class="grid grid-cols-2 gap-3"><input type="number" step="0.01" id="modal_real_dist" class="bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none"><input type="text" id="modal_real_pace" placeholder="5:30" class="bg-white/5 border border-white/10 rounded-2xl p-4 text-xs font-black outline-none"></div>
+                <div class="grid grid-cols-3 gap-2">
+                    <label class="cursor-pointer"><input type="radio" name="effort_level" value="easy" class="hidden peer"><div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-green-500/20 peer-checked:border-green-500 transition-all uppercase">Easy</div></label>
+                    <label class="cursor-pointer"><input type="radio" name="effort_level" value="perfect" checked class="hidden peer"><div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-faf-neon/20 peer-checked:border-faf-neon transition-all uppercase text-faf-neon">Perfect</div></label>
+                    <label class="cursor-pointer"><input type="radio" name="effort_level" value="hard" class="hidden peer"><div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-red-500/20 peer-checked:border-red-500 transition-all uppercase text-red-500">Hard</div></label>
                 </div>
             </div>
-            <button onclick="submitWorkoutFeedback()" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Sincronizar Dados</button>
+            <button onclick="submitWorkoutFeedback()" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Sincronizar</button>
         </div>
     </div>
 
     <nav class="fixed bottom-0 left-0 w-full p-6 pb-[var(--safe-bottom)] z-[400] bg-gradient-to-t from-black via-black/80 to-transparent">
         <div class="bg-black/95 backdrop-blur-3xl rounded-[35px] border border-white/10 p-2 flex justify-around items-center shadow-2xl max-w-sm mx-auto">
-            <button onclick="switchTab('home')" id="btn-home" class="nav-active flex flex-col items-center justify-center w-14 h-14">
-                <span class="material-symbols-outlined text-2xl">directions_run</span>
-                <span class="text-[8px] font-black uppercase mt-0.5 italic">Run</span>
-            </button>
-            <button onclick="switchTab('insights')" id="btn-insights" class="flex flex-col items-center justify-center w-14 h-14 text-white/30">
-                <span class="material-symbols-outlined text-2xl">analytics</span>
-                <span class="text-[8px] font-black uppercase mt-0.5 italic">Data</span>
-            </button>
-            <button onclick="switchTab('club')" id="btn-club" class="flex flex-col items-center justify-center w-14 h-14 text-white/30">
-                <span class="material-symbols-outlined text-2xl">groups</span>
-                <span class="text-[8px] font-black uppercase mt-0.5 italic">Club</span>
-            </button>
-            <button onclick="switchTab('profile')" id="btn-profile" class="flex flex-col items-center justify-center w-14 h-14 text-white/30">
-                <span class="material-symbols-outlined text-2xl">person</span>
-                <span class="text-[8px] font-black uppercase mt-0.5 italic">Me</span>
-            </button>
+            <button onclick="switchTab('home')" id="btn-home" class="nav-active flex flex-col items-center justify-center w-14 h-14 text-white/30"><span class="material-symbols-outlined text-2xl">directions_run</span></button>
+            <button onclick="switchTab('insights')" id="btn-insights" class="flex flex-col items-center justify-center w-14 h-14 text-white/30"><span class="material-symbols-outlined text-2xl">analytics</span></button>
+            <button onclick="switchTab('club')" id="btn-club" class="flex flex-col items-center justify-center w-14 h-14 text-white/30"><span class="material-symbols-outlined text-2xl">groups</span></button>
+            <button onclick="switchTab('profile')" id="btn-profile" class="flex flex-col items-center justify-center w-14 h-14 text-white/30"><span class="material-symbols-outlined text-2xl">person</span></button>
         </div>
     </nav>
 
     <script>
-        // COACH UI
-        function openCoachChat() {
-            document.getElementById('coach-overlay').classList.add('active');
-            setTimeout(() => document.getElementById('chat-input').focus(), 400);
-        }
+        // COACH LOGIC
+        function openCoachChat() { document.getElementById('coach-overlay').classList.add('active'); setTimeout(() => document.getElementById('chat-input').focus(), 400); }
         function closeCoachChat() { document.getElementById('coach-overlay').classList.remove('active'); }
-
         async function sendMessage() {
             const input = document.getElementById('chat-input');
             const container = document.getElementById('chat-messages');
             if (!input.value.trim()) return;
             const msg = input.value; input.value = '';
-            const userDiv = document.createElement('div'); userDiv.className = 'user-bubble'; userDiv.innerText = msg;
-            container.appendChild(userDiv); container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-            const loading = document.createElement('div'); loading.className = 'coach-bubble opacity-50'; loading.innerText = 'Neural Process...';
-            container.appendChild(loading);
+            const userDiv = document.createElement('div'); userDiv.className = 'user-bubble'; userDiv.innerText = msg; container.appendChild(userDiv);
+            const loading = document.createElement('div'); loading.className = 'coach-bubble opacity-50'; loading.innerText = 'Neural Process...'; container.appendChild(loading);
             try {
                 const response = await fetch('../src/engines/ai_engine.php', { method: 'POST', body: JSON.stringify({ message: msg }) });
                 const data = await response.json(); container.removeChild(loading);
                 const coachDiv = document.createElement('div'); coachDiv.className = 'coach-bubble italic'; coachDiv.innerText = data.reply;
                 container.appendChild(coachDiv); container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-            } catch (e) { loading.innerText = "Connection Error."; }
+            } catch (e) { loading.innerText = "Error."; }
         }
 
-        // FEEDBACK AJAX
+        // NAVIGATION LOGIC
+        function changeWeek(delta) {
+            const current = <?= $current_week ?>;
+            const total = <?= $total_cycle_weeks ?>;
+            const target = current + delta;
+            if(target >= 1 && target <= total) { window.location.href = `?week=${target}`; }
+        }
+
+        function focusDay(day) {
+            document.querySelectorAll('.day-item').forEach(el => el.classList.remove('selected', 'opacity-100'));
+            const target = document.querySelector(`.day-item[data-day="${day}"]`);
+            if(target) target.classList.add('selected');
+            document.querySelectorAll('.workout-card').forEach(card => { card.classList.remove('focused'); card.classList.add('minimized'); });
+            const selectedCard = document.getElementById(`card-${day}`);
+            if(selectedCard) { selectedCard.classList.add('focused'); selectedCard.classList.remove('minimized'); document.getElementById('app-main').scrollTo({ top: selectedCard.offsetTop - 15, behavior: 'smooth' }); }
+        }
+
+        function switchTab(id) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('nav-active'));
+            document.getElementById(id).classList.add('active');
+            document.getElementById('btn-' + id).classList.add('nav-active');
+            document.getElementById('run-header-extras').style.display = (id === 'home') ? 'block' : 'none';
+        }
+
+        // SWIPE LOGIC
+        let touchstartX = 0;
+        const swipeArea = document.getElementById('swipe-area');
+        swipeArea.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; }, {passive: true});
+        swipeArea.addEventListener('touchend', e => { 
+            const dist = e.changedTouches[0].screenX - touchstartX;
+            if (dist < -80) changeWeek(1);
+            if (dist > 80) changeWeek(-1);
+        }, {passive: true});
+
+        // AJAX FEEDBACK
         async function submitWorkoutFeedback() {
             const data = {
                 id: document.getElementById('modal_workout_id').value,
@@ -392,27 +366,6 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             };
             await fetch('../src/api/checkin_engine.php', { method: 'POST', body: JSON.stringify(data) });
             location.reload();
-        }
-
-        // UI HELPERS (focusDay, switchTab, etc)
-        function focusDay(day) {
-            document.querySelectorAll('.day-item').forEach(el => el.classList.remove('selected', 'opacity-100'));
-            const target = document.querySelector(`.day-item[data-day="${day}"]`);
-            if(target) target.classList.add('selected');
-            document.querySelectorAll('.workout-card').forEach(card => { card.classList.remove('focused'); card.classList.add('minimized'); });
-            const selectedCard = document.getElementById(`card-${day}`);
-            if(selectedCard) {
-                selectedCard.classList.add('focused'); selectedCard.classList.remove('minimized');
-                document.getElementById('app-main').scrollTo({ top: selectedCard.offsetTop - 15, behavior: 'smooth' });
-            }
-        }
-
-        function switchTab(id) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('nav button').forEach(b => b.classList.remove('nav-active', 'text-faf-neon'));
-            document.getElementById(id).classList.add('active');
-            document.getElementById('btn-' + id).classList.add('nav-active');
-            document.getElementById('run-header-extras').style.display = (id === 'home') ? 'block' : 'none';
         }
 
         const syncOrder = async () => {
