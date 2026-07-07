@@ -66,4 +66,64 @@ class AiEngine {
 
         return $res['choices'][0]['message']['content'] ?? 'Erro de processamento neural.';
     }
+
+    /**
+     * Reescreve as descrições de um plano gerado para variedade/motivação,
+     * num único pedido em lote. As regras já fixaram distância/pace/fase —
+     * a IA só pode mudar o texto. Qualquer falha (rede, JSON inválido,
+     * contagem errada) devolve as descrições originais sem quebrar a geração.
+     *
+     * @param array $workouts Lista de treinos com 'type','dist','pace','phase','desc'
+     * @return array Lista de descrições (mesma ordem/tamanho que $workouts)
+     */
+    public static function varietyPass(array $workouts) {
+        $fallback = array_column($workouts, 'desc');
+        if (empty($workouts) || empty(GROQ_KEY)) return $fallback;
+
+        $lines = [];
+        foreach ($workouts as $i => $w) {
+            $lines[] = "{$i}|{$w['type']}|" . round($w['dist'], 1) . "km|{$w['pace']}/km|{$w['phase']}";
+        }
+
+        $systemPrompt = "Reescreve, em PT-PT, a descrição de cada treino de corrida listado abaixo "
+            . "(formato indice|tipo|distancia|pace|fase). Mantém EXATAMENTE os números e o objetivo "
+            . "fisiológico do tipo de treino — varia só o tom e a motivação, frases curtas (máx 20 palavras). "
+            . "Responde SÓ com um array JSON de strings, na mesma ordem e com o mesmo tamanho da lista, sem mais texto.";
+
+        $data = [
+            'model' => 'llama-3.3-70b-versatile',
+            'messages' => [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => implode("\n", $lines)]
+            ],
+            'temperature' => 0.6,
+            'max_tokens' => 4000,
+        ];
+
+        $ch = curl_init('https://api.groq.com/openai/v1/chat/completions');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . GROQ_KEY,
+            'Content-Type: application/json'
+        ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+
+        $response = curl_exec($ch);
+        $failed = curl_errno($ch);
+        curl_close($ch);
+        if ($failed) return $fallback;
+
+        $res = json_decode($response, true);
+        $content = trim($res['choices'][0]['message']['content'] ?? '');
+        $content = preg_replace('/^```(json)?|```$/m', '', $content);
+        $rewritten = json_decode(trim($content), true);
+
+        if (!is_array($rewritten) || count($rewritten) !== count($workouts)) return $fallback;
+        foreach ($rewritten as $r) {
+            if (!is_string($r) || trim($r) === '') return $fallback;
+        }
+        return array_values($rewritten);
+    }
 }

@@ -39,8 +39,10 @@ try {
 
     // 2. Lógica de Tendência Neural (Ajuste adaptativo do FAF)
     if ($status == 'completed' && $effort) {
-        $res = $conn->query("SELECT neural_trend FROM user_profiles WHERE user_id = $user_id");
-        $profile = $res->fetch_assoc();
+        $stmt_t = $conn->prepare("SELECT neural_trend FROM user_profiles WHERE user_id = ?");
+        $stmt_t->bind_param("i", $user_id);
+        $stmt_t->execute();
+        $profile = $stmt_t->get_result()->fetch_assoc();
         $trend = (int)($profile['neural_trend'] ?? 0);
 
         // Se o esforço for 'easy' (fácil), a tendência sobe; se for 'hard' (difícil), desce
@@ -52,7 +54,7 @@ try {
         if (abs($trend) >= 2) {
             // AJUSTADO: Caminho para o kernel_engine em /src/engines/
             require_once __DIR__ . '/../engines/kernel_engine.php';
-            
+
             // Fator de correção: 0.95 (mais rápido) ou 1.05 (mais lento)
             $factor = ($trend >= 2) ? 0.95 : 1.05;
             if (function_exists('recalculateFutureWeeks')) {
@@ -60,7 +62,9 @@ try {
             }
             $trend = 0; // Reset após adaptação
         }
-        $conn->query("UPDATE user_profiles SET neural_trend = $trend WHERE user_id = $user_id");
+        $stmt_u = $conn->prepare("UPDATE user_profiles SET neural_trend = ? WHERE user_id = ?");
+        $stmt_u->bind_param("ii", $trend, $user_id);
+        $stmt_u->execute();
     }
 
     echo json_encode(['success' => true]);
