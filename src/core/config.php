@@ -33,6 +33,11 @@ define('GOOGLE_ID', $_ENV['GOOGLE_CLIENT_ID'] ?? '');
 define('GOOGLE_SECRET', $_ENV['GOOGLE_CLIENT_SECRET'] ?? '');
 define('GOOGLE_REDIRECT', $_ENV['GOOGLE_REDIRECT_URL'] ?? 'http://localhost/FAF/google-callback.php');
 
+// STRAVA AUTH (cria a app em https://www.strava.com/settings/api e põe as chaves no .env)
+define('STRAVA_CLIENT_ID', $_ENV['STRAVA_CLIENT_ID'] ?? '');
+define('STRAVA_CLIENT_SECRET', $_ENV['STRAVA_CLIENT_SECRET'] ?? '');
+define('STRAVA_REDIRECT', $_ENV['STRAVA_REDIRECT_URL'] ?? 'http://localhost/FAF/public/strava-callback.php');
+
 // CONEXÃO
 $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 if ($conn->connect_error) {
