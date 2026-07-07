@@ -8,14 +8,23 @@ if (!isset($_SESSION['user_id'])) {
 
 $user_id = $_SESSION['user_id'];
 
+// Escapa texto vindo de campos preenchidos pelo utilizador (nome, nome do circle)
+// antes de o imprimir em HTML.
+function e($str) { return htmlspecialchars($str ?? '', ENT_QUOTES, 'UTF-8'); }
+
 /**
  * 1. DATA LAYER
  */
-$query = "SELECT u.name, u.profile_pic, p.* FROM users u LEFT JOIN user_profiles p ON u.id = p.user_id WHERE u.id = ?";
+$query = "SELECT u.name, u.profile_pic, u.circle_id, p.* FROM users u LEFT JOIN user_profiles p ON u.id = p.user_id WHERE u.id = ?";
 $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $userData = $stmt->get_result()->fetch_assoc();
+
+// Sincroniza a sessão com a DB para evitar que o estado antigo bloqueie a interface
+if (isset($userData['circle_id'])) {
+    $_SESSION['circle_id'] = $userData['circle_id'];
+}
 
 /**
  * 2. IDENTITY LAYER
@@ -23,6 +32,54 @@ $userData = $stmt->get_result()->fetch_assoc();
 $userName = $userData['name'] ?? $_SESSION['user_name'] ?? 'Atleta';
 $userPic  = $userData['profile_pic'] ?? $_SESSION['user_pic'] ?? 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($userName);
 $first_name = explode(' ', $userName)[0];
+
+/**
+ * 2b. SOCIAL ENGINE LOGIC (Circle, fogo, amigos, notificações)
+ */
+$circle_energy = 0; $circle_name = "Solo Protocol"; $streak = 0;
+$clan_members = [];
+if (!empty($userData['circle_id'])) {
+    $c_id = $userData['circle_id'];
+    $stmt_c = $conn->prepare("SELECT name, streak_count FROM circles WHERE id = ?");
+    $stmt_c->bind_param("i", $c_id);
+    $stmt_c->execute();
+    $c_info = $stmt_c->get_result()->fetch_assoc();
+    $circle_name = $c_info['name'] ?? "Alpha Circle";
+    $streak = $c_info['streak_count'] ?? 0;
+
+    $stmt_m = $conn->prepare("SELECT name, profile_pic FROM users WHERE circle_id = ?");
+    $stmt_m->bind_param("i", $c_id);
+    $stmt_m->execute();
+    $clan_members = $stmt_m->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $cw = isset($_GET['week']) ? (int)$_GET['week'] : 1;
+    $stmt_stats = $conn->prepare("SELECT COUNT(*) as total, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as done
+                                  FROM training_plans tp JOIN users u ON tp.user_id = u.id
+                                  WHERE u.circle_id = ? AND tp.week_number = ?");
+    $stmt_stats->bind_param("ii", $c_id, $cw);
+    $stmt_stats->execute();
+    $s = $stmt_stats->get_result()->fetch_assoc();
+    $circle_energy = ($s['total'] > 0) ? round(($s['done'] / $s['total']) * 100) : 100;
+}
+
+// Tiers de intensidade do fogo do Circle, derivados do streak
+function fireTier($streak) {
+    if ($streak >= 7) return ['label' => 'INFERNO', 'emoji' => '🔥🔥🔥'];
+    if ($streak >= 3) return ['label' => 'BLAZE', 'emoji' => '🔥🔥'];
+    return ['label' => 'EMBER', 'emoji' => '🔥'];
+}
+$fire = fireTier($streak);
+
+$stmt_f = $conn->prepare("SELECT u.name, u.profile_pic FROM friendships f JOIN users u ON (f.user_id = u.id OR f.friend_id = u.id) WHERE (f.user_id = ? OR f.friend_id = ?) AND f.status = 'accepted' AND u.id != ?");
+$stmt_f->bind_param("iii", $user_id, $user_id, $user_id);
+$stmt_f->execute();
+$my_friends = $stmt_f->get_result()->fetch_all(MYSQLI_ASSOC);
+
+$stmt_inbox = $conn->prepare("SELECT f.user_id as athlete_id, u.name, u.profile_pic FROM friendships f JOIN users u ON f.user_id = u.id WHERE f.friend_id = ? AND f.status = 'pending'");
+$stmt_inbox->bind_param("i", $user_id);
+$stmt_inbox->execute();
+$notifications = $stmt_inbox->get_result();
+$notif_count = $notifications->num_rows;
 
 /**
  * 3. ENGINE LAYER
@@ -99,7 +156,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         ::-webkit-scrollbar { display: none; }
         .nav-active { color: #c3f400 !important; background: rgba(195, 244, 0, 0.1); border-radius: 20px; }
         .drag-handle { cursor: grab; }
-        #abort-modal, #feedback-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
 
         /* Coach Overlay */
         #coach-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); z-index: 4000; align-items: center; justify-content: center; padding: 20px; }
@@ -118,7 +175,13 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <img src="<?= $userPic ?>" class="w-9 h-9 rounded-full border border-faf-neon/30 object-cover" referrerpolicy="no-referrer">
                 <h1 class="text-xl font-headline font-black italic uppercase tracking-tighter">FAF<span class="text-faf-neon">.</span></h1>
             </div>
-            <span onclick="switchTab('profile')" class="material-symbols-outlined text-faf-neon text-2xl cursor-pointer">settings</span>
+            <div class="flex items-center gap-4">
+                <div onclick="toggleInbox()" class="relative cursor-pointer">
+                    <span class="material-symbols-outlined text-white/40 text-2xl">notifications</span>
+                    <?php if($notif_count > 0): ?><div class="absolute -top-1 -right-1 w-4 h-4 bg-faf-neon rounded-full flex items-center justify-center text-[10px] text-black font-black"><?= $notif_count ?></div><?php endif; ?>
+                </div>
+                <span onclick="switchTab('profile')" class="material-symbols-outlined text-faf-neon text-2xl cursor-pointer">settings</span>
+            </div>
         </div>
 
         <div id="run-header-extras" class="pb-4 space-y-4">
@@ -214,16 +277,68 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         </div>
 
         <div id="club" class="tab-content space-y-6">
-            <h2 class="text-4xl font-headline font-black italic uppercase tracking-tighter pt-4">The Syndicate</h2>
-            <div class="glass-card p-5 rounded-[35px] flex items-center gap-5 border-l-4 border-faf-neon">
-                <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Rafa" class="w-14 h-14 rounded-full border border-faf-neon/30 p-1">
-                <div class="flex-1"><p class="text-lg font-black italic uppercase leading-none">Rafa Silva</p><p class="text-[10px] text-white/40 mt-2 font-bold uppercase italic tracking-widest">12KM Mission @ 4:55 Pace</p></div>
+            <div class="flex justify-between items-center pt-4"><h2 class="text-4xl font-headline font-black italic uppercase tracking-tighter leading-none">Syndicate</h2><button onclick="toggleSearch()" class="w-12 h-12 rounded-full bg-faf-neon text-black flex items-center justify-center active:scale-90 shadow-lg"><span class="material-symbols-outlined font-black">person_add</span></button></div>
+            <div class="flex gap-8 border-b border-white/5"><button onclick="toggleClubSubTab('syndicate')" id="btn-club-syn" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-faf-neon border-b-2 border-faf-neon">Friends</button><button onclick="toggleClubSubTab('circle')" id="btn-club-cir" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-white/30">The Circle</button></div>
+
+            <div id="club-syndicate-hub" class="space-y-4">
+                <?php foreach($my_friends as $f): ?>
+                <div class="glass-card p-5 rounded-[35px] flex items-center gap-5 border-l-4 border-faf-neon">
+                    <img src="<?= $f['profile_pic'] ?>" class="w-14 h-14 rounded-full border border-faf-neon/30 p-1">
+                    <div class="flex-1"><p class="text-lg font-black italic uppercase leading-none"><?= e($f['name']) ?></p><p class="text-[10px] text-faf-neon mt-1 font-bold italic uppercase tracking-widest">ATHLETE SYNCED</p></div>
+                </div>
+                <?php endforeach; if(empty($my_friends)) echo "<p class='text-[10px] text-white/20 text-center py-10 italic'>No allies found.</p>"; ?>
+            </div>
+
+            <div id="club-circle-hub" class="hidden space-y-6">
+                <?php if(!empty($userData['circle_id'])): ?>
+                    <div class="bg-faf-neon p-7 rounded-[45px] text-black shadow-2xl flex justify-between items-center">
+                        <div>
+                            <h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter"><?= e($circle_name) ?></h3>
+                            <p class="text-[9px] font-black uppercase tracking-widest opacity-60">Clan Sync Active</p>
+                            <p class="text-[10px] font-black uppercase tracking-widest mt-1">ID de convite: #<?= $userData['circle_id'] ?></p>
+                        </div>
+                        <div class="text-center text-3xl"><?= $fire['emoji'] ?> <span class="block text-xl font-black"><?= $streak ?></span><span class="block text-[8px] font-black uppercase tracking-widest"><?= $fire['label'] ?></span></div>
+                    </div>
+
+                    <button onclick="shareRecruit()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl text-[10px] font-black uppercase italic flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined text-sm">share</span> Recruit Allies
+                    </button>
+
+                    <div class="glass-card rounded-[35px] p-6 space-y-4">
+                        <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Clan Leaderboard</p>
+                        <?php foreach($clan_members as $idx => $m): ?>
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs font-black text-faf-neon"><?= str_pad($idx+1, 2, '0', STR_PAD_LEFT) ?></span>
+                                <img src="<?= $m['profile_pic'] ?>" class="w-6 h-6 rounded-full">
+                                <p class="text-xs font-black italic uppercase"><?= e($m['name']) ?></p>
+                            </div>
+                            <span class="text-xs font-black italic">ACTIVE</span>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <div class="glass-card rounded-[35px] p-6 space-y-4">
+                        <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Circle Feed</p>
+                        <div id="circle-feed-list" class="space-y-3 max-h-[240px] overflow-y-auto"></div>
+                        <div class="flex gap-2 pt-2 border-t border-white/5">
+                            <input id="circle-feed-input" type="text" placeholder="Fala com o Circle..." class="flex-1 bg-white/5 border border-white/10 rounded-2xl p-3 text-xs text-white outline-none">
+                            <button onclick="sendCircleMessage()" class="w-10 h-10 rounded-2xl bg-faf-neon text-black flex items-center justify-center"><span class="material-symbols-outlined text-sm font-black">send</span></button>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="glass-card p-12 rounded-[50px] text-center border-dashed border-2 border-white/10 space-y-4">
+                        <p class="text-[11px] text-white/40 italic">No Circle Established.</p>
+                        <button onclick="openCircleEstablishModal()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black italic uppercase text-xs">Establish Unit</button>
+                        <button onclick="openCircleJoinModal()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl font-black italic uppercase text-xs">Join com ID de Convite</button>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
 
         <div id="profile" class="tab-content space-y-8 text-center pt-8">
             <div class="relative w-32 h-32 mx-auto"><img src="<?= $userPic ?>" class="w-full h-full rounded-full border-4 border-faf-neon p-1 bg-zinc-900 shadow-2xl object-cover"></div>
-            <h3 class="text-3xl font-headline font-black italic uppercase italic tracking-tighter"><?= $userName ?></h3>
+            <h3 class="text-3xl font-headline font-black italic uppercase italic tracking-tighter"><?= e($userName) ?></h3>
             <div class="grid grid-cols-3 gap-3 px-4">
                 <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Peso</p><p class="text-xl font-black italic"><?= $userData['weight'] ?? '--' ?>kg</p></div>
                 <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Idade</p><p class="text-xl font-black italic"><?= $userData['age'] ?? '--' ?></p></div>
@@ -262,6 +377,41 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 </div>
             </div>
         </div>
+    </div>
+
+    <div id="neural-inbox">
+        <div class="glass-card p-8 rounded-[40px] max-w-sm w-full space-y-6">
+            <div class="flex justify-between items-center"><p class="text-[10px] font-black uppercase text-faf-neon italic tracking-widest">Neural Inbox</p><span onclick="toggleInbox()" class="material-symbols-outlined text-white/20 cursor-pointer">close</span></div>
+            <div class="space-y-4 max-h-[300px] overflow-y-auto">
+                <?php while($req = $notifications->fetch_assoc()): ?>
+                <div class="flex items-center justify-between bg-white/5 p-4 rounded-2xl border-l-2 border-faf-neon">
+                    <p class="text-xs font-black italic uppercase"><?= e($req['name']) ?></p>
+                    <div class="flex gap-2">
+                        <button onclick="handleFriend('accept', <?= $req['athlete_id'] ?>)" class="bg-faf-neon text-black p-2 rounded-xl"><span class="material-symbols-outlined text-sm font-black">done</span></button>
+                    </div>
+                </div>
+                <?php endwhile; if($notif_count == 0) echo "<p class='text-[10px] text-white/20 text-center py-10 italic'>No requests.</p>"; ?>
+            </div>
+        </div>
+    </div>
+
+    <div id="generic-modal">
+        <div class="glass-card p-8 rounded-[40px] max-w-sm w-full space-y-6 text-center">
+            <h3 id="gmodal-title" class="text-xl font-headline font-black italic uppercase text-faf-neon">Neural Setup</h3>
+            <div id="gmodal-input-container" class="hidden">
+                <input type="text" id="gmodal-field" placeholder="..." class="w-full bg-white/5 p-4 text-white font-black italic outline-none rounded-2xl border border-white/10">
+            </div>
+            <p id="gmodal-body" class="text-xs text-white/60 italic"></p>
+            <div class="flex gap-3">
+                <button id="gmodal-cancel" class="flex-1 py-4 bg-white/5 rounded-2xl text-[10px] font-black uppercase italic">Abort</button>
+                <button id="gmodal-confirm" class="flex-1 py-4 bg-faf-neon text-black rounded-2xl text-[10px] font-black uppercase italic">Execute</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="search-overlay">
+        <header class="flex justify-between items-center mb-10"><h2 class="text-2xl font-headline font-black italic uppercase text-faf-neon tracking-tighter italic">Sync Unit</h2><span onclick="toggleSearch()" class="material-symbols-outlined text-white/40 cursor-pointer">close</span></header>
+        <div class="space-y-6"><div class="glass-card p-1.5 rounded-[28px] border-faf-neon/20 flex items-center px-4"><span class="material-symbols-outlined text-white/20 mr-3">fingerprint</span><input type="number" id="sid" placeholder="Athlete ID..." class="flex-1 bg-transparent py-4 text-white font-black italic outline-none"></div><button onclick="identifyAthlete()" class="w-full py-5 bg-faf-neon text-black rounded-3xl font-black uppercase italic shadow-lg">Identify</button></div>
     </div>
 
     <div id="abort-modal">
@@ -379,6 +529,107 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         function openCheckIn(id, type, dist) { document.getElementById('modal_workout_id').value = id; document.getElementById('modal_real_dist').value = dist; document.getElementById('feedback-modal').style.display = 'flex'; }
         function closeCheckIn() { document.getElementById('feedback-modal').style.display = 'none'; }
         function toggleFeedbackFields() { document.getElementById('feedback_fields').style.display = (document.getElementById('workout_status').value === 'completed') ? 'block' : 'none'; }
+
+        // --- SOCIAL: Syndicate / Circle ---
+        function toggleInbox() { const el = document.getElementById('neural-inbox'); el.style.display = (el.style.display === 'flex') ? 'none' : 'flex'; }
+        function toggleSearch() { const el = document.getElementById('search-overlay'); el.style.display = (el.style.display === 'flex') ? 'none' : 'flex'; }
+
+        function toggleClubSubTab(sub) {
+            document.getElementById('club-syndicate-hub').classList.toggle('hidden', sub !== 'syndicate');
+            document.getElementById('club-circle-hub').classList.toggle('hidden', sub !== 'circle');
+            document.getElementById('btn-club-syn').className = sub === 'syndicate' ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon" : "pb-3 text-xs font-black uppercase italic text-white/30";
+            document.getElementById('btn-club-cir').className = sub === 'circle' ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon" : "pb-3 text-xs font-black uppercase italic text-white/30";
+            if (sub === 'circle') loadCircleFeed();
+        }
+
+        function showNeuralModal(title, body, isInput, onConfirm) {
+            const m = document.getElementById('generic-modal');
+            const inputContainer = document.getElementById('gmodal-input-container');
+            document.getElementById('gmodal-title').innerText = title;
+            document.getElementById('gmodal-body').innerText = body;
+            inputContainer.classList.toggle('hidden', !isInput);
+            m.style.display = 'flex';
+            document.getElementById('gmodal-confirm').onclick = async () => {
+                const val = document.getElementById('gmodal-field').value;
+                await onConfirm(val);
+                m.style.display = 'none';
+            };
+            document.getElementById('gmodal-cancel').onclick = () => m.style.display = 'none';
+        }
+
+        async function identifyAthlete() {
+            const athleteId = document.getElementById('sid').value;
+            if(!athleteId) return;
+            const res = await fetch('../src/api/search_action.php', { method: 'POST', body: JSON.stringify({ action: 'search', athlete_id: athleteId }) });
+            const data = await res.json();
+            if(data.success) {
+                showNeuralModal("Athlete Identified", `Sincronizar com ${data.user.name}?`, false, async () => {
+                    await fetch('../src/api/social_engine.php', { method: 'POST', body: JSON.stringify({ action: 'request', friend_id: data.user.id }) });
+                    alert('Neural request sent.');
+                });
+            } else { alert("Target not found."); }
+        }
+
+        async function handleFriend(action, friendId) {
+            const res = await fetch('../src/api/social_engine.php', { method: 'POST', body: JSON.stringify({ action: action, friend_id: friendId }) });
+            const data = await res.json();
+            if(data.success) location.reload();
+        }
+
+        async function openCircleEstablishModal() {
+            showNeuralModal("Establish Circle", "Define o nome da tua unidade de elite.", true, async (name) => {
+                if(!name) return;
+                const res = await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'create', name: name }) });
+                const data = await res.json();
+                if(data.success) location.reload();
+            });
+        }
+
+        async function openCircleJoinModal() {
+            showNeuralModal("Join Circle", "Introduz o ID de convite do Circle.", true, async (code) => {
+                if(!code) return;
+                const res = await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'join', invite_code: code }) });
+                const data = await res.json();
+                if(data.success) location.reload();
+                else alert(data.error || 'Circle não encontrado.');
+            });
+        }
+
+        function shareRecruit() {
+            const link = `https://faf.app/recruit?circle=<?= $userData['circle_id'] ?? '' ?>`;
+            navigator.clipboard.writeText(link).then(() => alert("Recruitment link copied to clipboard!"));
+        }
+
+        function escapeHtml(str) {
+            const d = document.createElement('div');
+            d.innerText = str ?? '';
+            return d.innerHTML;
+        }
+
+        async function loadCircleFeed() {
+            const list = document.getElementById('circle-feed-list');
+            if (!list) return;
+            const res = await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'get_messages' }) });
+            const data = await res.json();
+            if (!data.success) return;
+            list.innerHTML = data.messages.map(m => {
+                if (m.type === 'user_action') {
+                    return `<div class="text-xs"><span class="font-black text-faf-neon uppercase italic">${escapeHtml(m.name || 'Atleta')}:</span> <span class="text-white/70">${escapeHtml(m.message)}</span></div>`;
+                }
+                const color = m.type === 'alert' ? 'text-red-500' : 'text-white/40';
+                return `<div class="text-[10px] italic ${color}">${escapeHtml(m.message)}</div>`;
+            }).join('') || `<p class="text-[10px] text-white/20 text-center py-6 italic">Sem atividade ainda.</p>`;
+            list.scrollTop = list.scrollHeight;
+        }
+
+        async function sendCircleMessage() {
+            const input = document.getElementById('circle-feed-input');
+            const message = input.value.trim();
+            if (!message) return;
+            input.value = '';
+            await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'send_message', message }) });
+            loadCircleFeed();
+        }
 
         Sortable.create(document.getElementById('days-nav'), { animation: 300, onEnd: syncOrder });
         Sortable.create(document.getElementById('drag-container'), { animation: 400, handle: ".drag-handle", onEnd: syncOrder });
