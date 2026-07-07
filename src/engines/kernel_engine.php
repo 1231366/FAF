@@ -98,9 +98,9 @@ $current_week = isset($_GET['week']) ? (int)$_GET['week'] : 1;
 $stmt = $conn->prepare("SELECT * FROM user_profiles WHERE user_id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
-$userData = $stmt->get_result()->fetch_assoc();
+$profileData = $stmt->get_result()->fetch_assoc();
 
-if (!$userData) die("Perfil neural não configurado.");
+if (!$profileData) die("Perfil neural não configurado.");
 
 // Verificar se o plano já existe para evitar re-geração infinita
 $stmt = $conn->prepare("SELECT id FROM training_plans WHERE user_id = ? LIMIT 1");
@@ -110,15 +110,15 @@ $plan_exists = ($stmt->get_result()->num_rows > 0);
 
 if (!$plan_exists) {
     // --- 4. PARÂMETROS ---
-    $ref_dist = (float)($userData['ref_dist'] ?? 5);
-    $ref_pace = paceToSec($userData['ref_pace'] ?? '25:00');
+    $ref_dist = (float)($profileData['ref_dist'] ?? 5);
+    $ref_pace = paceToSec($profileData['ref_pace'] ?? '25:00');
     $vdot = calculateVdot($ref_dist, $ref_pace);
 
-    $target_dist = (int)($userData['target_distance'] ?? 10);
-    $total_weeks = (int)($userData['prep_cycle'] ?? 12);
-    $available_days = explode(',', $userData['available_days']);
+    $target_dist = (int)($profileData['target_distance'] ?? 10);
+    $total_weeks = (int)($profileData['prep_cycle'] ?? 12);
+    $available_days = explode(',', $profileData['available_days']);
     $long_day = end($available_days);
-    $fitness_level = $userData['fitness_level'] ?? 'Regular';
+    $fitness_level = $profileData['fitness_level'] ?? 'Regular';
 
     $p_easy = getPaceByIntensity($vdot, 'EASY');
     $p_threshold = getPaceByIntensity($vdot, 'THRESHOLD');

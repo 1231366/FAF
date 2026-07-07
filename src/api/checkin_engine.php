@@ -9,6 +9,58 @@ require_once __DIR__ . '/../core/config.php';
 // Define o cabeçalho como JSON logo no início para o AJAX
 header('Content-Type: application/json');
 
+// Mantém o streak_count do Circle e posta o evento correspondente no feed.
+// Streak sobe uma vez por dia quando TODOS os treinos agendados nesse dia,
+// entre membros do Circle, ficam 'completed'; qualquer 'skipped' apaga o fogo.
+function updateCircleAfterCheckin($conn, $user_id, $workout_date, $status, $workout_type) {
+    $stmt_u = $conn->prepare("SELECT circle_id, name FROM users WHERE id = ?");
+    $stmt_u->bind_param("i", $user_id);
+    $stmt_u->execute();
+    $user = $stmt_u->get_result()->fetch_assoc();
+    $circle_id = $user['circle_id'] ?? null;
+    if (!$circle_id) return;
+
+    $stmt_c = $conn->prepare("SELECT streak_count, last_streak_update FROM circles WHERE id = ?");
+    $stmt_c->bind_param("i", $circle_id);
+    $stmt_c->execute();
+    $circle = $stmt_c->get_result()->fetch_assoc();
+    if (!$circle) return;
+
+    if ($status === 'skipped') {
+        $msg = "{$user['name']} falhou {$workout_type}. O fogo do Circle esfria 🔥→🕯️";
+        if ((int)$circle['streak_count'] !== 0) {
+            $upd = $conn->prepare("UPDATE circles SET streak_count = 0 WHERE id = ?");
+            $upd->bind_param("i", $circle_id);
+            $upd->execute();
+        }
+        $ins = $conn->prepare("INSERT INTO circle_feed (circle_id, user_id, message, type) VALUES (?, ?, ?, 'alert')");
+        $ins->bind_param("iis", $circle_id, $user_id, $msg);
+        $ins->execute();
+        return;
+    }
+
+    // status === 'completed': só conta o dia se TODOS os treinos agendados
+    // do Circle nesse dia já estiverem resolvidos (nenhum 'pending') e nenhum skip.
+    $stmt_s = $conn->prepare("SELECT tp.status FROM training_plans tp JOIN users u ON tp.user_id = u.id
+                               WHERE u.circle_id = ? AND tp.workout_date = ?");
+    $stmt_s->bind_param("is", $circle_id, $workout_date);
+    $stmt_s->execute();
+    $statuses = array_column($stmt_s->get_result()->fetch_all(MYSQLI_ASSOC), 'status');
+
+    if (empty($statuses) || in_array('pending', $statuses) || in_array('skipped', $statuses)) return;
+    if ($circle['last_streak_update'] === $workout_date) return; // já contado hoje
+
+    $upd = $conn->prepare("UPDATE circles SET streak_count = streak_count + 1, last_streak_update = ? WHERE id = ?");
+    $upd->bind_param("si", $workout_date, $circle_id);
+    $upd->execute();
+
+    $new_streak = (int)$circle['streak_count'] + 1;
+    $msg = "Dia limpo! Todo o Circle cumpriu os treinos. Streak: {$new_streak} 🔥";
+    $ins = $conn->prepare("INSERT INTO circle_feed (circle_id, user_id, message, type) VALUES (?, NULL, ?, 'system')");
+    $ins->bind_param("is", $circle_id, $msg);
+    $ins->execute();
+}
+
 try {
     // Verificação de sessão via config.php
     if (!isset($_SESSION['user_id'])) {
@@ -29,12 +81,23 @@ try {
     $pace       = !empty($data['pace']) ? $data['pace'] : null;
     $effort     = !empty($data['effort']) ? $data['effort'] : null;
 
+    // Dados do próprio treino, necessários para a mensagem de julgamento do Circle
+    $stmt_w = $conn->prepare("SELECT workout_date, workout_type FROM training_plans WHERE id = ? AND user_id = ?");
+    $stmt_w->bind_param("ii", $workout_id, $user_id);
+    $stmt_w->execute();
+    $workout_row = $stmt_w->get_result()->fetch_assoc();
+
     // 1. Atualizar o treino na tabela training_plans
     $stmt = $conn->prepare("UPDATE training_plans SET status = ?, real_distance = ?, real_pace = ?, effort_level = ?, completed_at = NOW() WHERE id = ? AND user_id = ?");
     $stmt->bind_param("sdssii", $status, $dist, $pace, $effort, $workout_id, $user_id);
-    
+
     if (!$stmt->execute()) {
         throw new Exception('Erro ao atualizar base de dados');
+    }
+
+    // 1b. Fogo do Circle: streak sobe se todos cumprirem, apaga-se com um skip.
+    if ($workout_row && in_array($status, ['completed', 'skipped'])) {
+        updateCircleAfterCheckin($conn, $user_id, $workout_row['workout_date'], $status, $workout_row['workout_type']);
     }
 
     // 2. Lógica de Tendência Neural (Ajuste adaptativo do FAF)

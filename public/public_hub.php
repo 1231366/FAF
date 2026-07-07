@@ -9,6 +9,10 @@ if (!isset($_SESSION['user_id'])) {
 
 $user_id = $_SESSION['user_id'];
 
+// Escapa texto vindo de campos preenchidos pelo utilizador (nome, nome do circle)
+// antes de o imprimir em HTML.
+function e($str) { return htmlspecialchars($str ?? '', ENT_QUOTES, 'UTF-8'); }
+
 /**
  * 1. DATA LAYER (Original + Social)
  */
@@ -59,6 +63,14 @@ if (!empty($userData['circle_id'])) {
     $s = $stmt_stats->get_result()->fetch_assoc();
     $circle_energy = ($s['total'] > 0) ? round(($s['done'] / $s['total']) * 100) : 100;
 }
+
+// Tiers de intensidade do fogo do Circle, derivados do streak
+function fireTier($streak) {
+    if ($streak >= 7) return ['label' => 'INFERNO', 'emoji' => '🔥🔥🔥'];
+    if ($streak >= 3) return ['label' => 'BLAZE', 'emoji' => '🔥🔥'];
+    return ['label' => 'EMBER', 'emoji' => '🔥'];
+}
+$fire = fireTier($streak);
 
 // Buscar Amigos Aceites para o Syndicate
 $stmt_f = $conn->prepare("SELECT u.name, u.profile_pic FROM friendships f JOIN users u ON (f.user_id = u.id OR f.friend_id = u.id) WHERE (f.user_id = ? OR f.friend_id = ?) AND f.status = 'accepted' AND u.id != ?");
@@ -169,7 +181,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         <div id="run-header-extras" class="pb-4 space-y-4">
             <div class="flex justify-between items-start">
                 <div>
-                    <p class="text-[10px] font-black uppercase text-faf-neon tracking-[0.2em] italic mb-0.5"><?= $circle_name ?> MISSION</p>
+                    <p class="text-[10px] font-black uppercase text-faf-neon tracking-[0.2em] italic mb-0.5"><?= e($circle_name) ?> MISSION</p>
                     <h2 class="text-2xl font-headline font-black italic uppercase tracking-tighter leading-none italic">Neural Protocol</h2>
                 </div>
                 <div class="flex flex-col items-center">
@@ -295,15 +307,22 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 <?php foreach($my_friends as $f): ?>
                 <div class="glass-card p-5 rounded-[35px] flex items-center gap-5 border-l-4 border-faf-neon">
                     <img src="<?= $f['profile_pic'] ?>" class="w-14 h-14 rounded-full border border-faf-neon/30 p-1">
-                    <div class="flex-1"><p class="text-lg font-black italic uppercase leading-none"><?= $f['name'] ?></p><p class="text-[10px] text-faf-neon mt-1 font-bold italic uppercase tracking-widest">ATHLETE SYNCED</p></div>
+                    <div class="flex-1"><p class="text-lg font-black italic uppercase leading-none"><?= e($f['name']) ?></p><p class="text-[10px] text-faf-neon mt-1 font-bold italic uppercase tracking-widest">ATHLETE SYNCED</p></div>
                 </div>
                 <?php endforeach; if(empty($my_friends)) echo "<p class='text-[10px] text-white/20 text-center py-10 italic'>No allies found.</p>"; ?>
             </div>
 
             <div id="club-circle-hub" class="hidden space-y-6">
                 <?php if(!empty($userData['circle_id'])): ?>
-                    <div class="bg-faf-neon p-7 rounded-[45px] text-black shadow-2xl flex justify-between items-center"><div><h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter"><?= $circle_name ?></h3><p class="text-[9px] font-black uppercase tracking-widest opacity-60">Clan Sync Active</p></div><div class="text-center text-3xl">🔥 <span class="block text-xl font-black"><?= $streak ?></span></div></div>
-                    
+                    <div class="bg-faf-neon p-7 rounded-[45px] text-black shadow-2xl flex justify-between items-center">
+                        <div>
+                            <h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter"><?= e($circle_name) ?></h3>
+                            <p class="text-[9px] font-black uppercase tracking-widest opacity-60">Clan Sync Active</p>
+                            <p class="text-[10px] font-black uppercase tracking-widest mt-1">ID de convite: #<?= $userData['circle_id'] ?></p>
+                        </div>
+                        <div class="text-center text-3xl"><?= $fire['emoji'] ?> <span class="block text-xl font-black"><?= $streak ?></span><span class="block text-[8px] font-black uppercase tracking-widest"><?= $fire['label'] ?></span></div>
+                    </div>
+
                     <button onclick="shareRecruit()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl text-[10px] font-black uppercase italic flex items-center justify-center gap-2">
                         <span class="material-symbols-outlined text-sm">share</span> Recruit Allies
                     </button>
@@ -315,16 +334,26 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                             <div class="flex items-center gap-3">
                                 <span class="text-xs font-black text-faf-neon"><?= str_pad($idx+1, 2, '0', STR_PAD_LEFT) ?></span>
                                 <img src="<?= $m['profile_pic'] ?>" class="w-6 h-6 rounded-full">
-                                <p class="text-xs font-black italic uppercase"><?= $m['name'] ?></p>
+                                <p class="text-xs font-black italic uppercase"><?= e($m['name']) ?></p>
                             </div>
                             <span class="text-xs font-black italic">ACTIVE</span>
                         </div>
                         <?php endforeach; ?>
                     </div>
+
+                    <div class="glass-card rounded-[35px] p-6 space-y-4">
+                        <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Circle Feed</p>
+                        <div id="circle-feed-list" class="space-y-3 max-h-[240px] overflow-y-auto"></div>
+                        <div class="flex gap-2 pt-2 border-t border-white/5">
+                            <input id="circle-feed-input" type="text" placeholder="Fala com o Circle..." class="flex-1 bg-white/5 border border-white/10 rounded-2xl p-3 text-xs text-white outline-none">
+                            <button onclick="sendCircleMessage()" class="w-10 h-10 rounded-2xl bg-faf-neon text-black flex items-center justify-center"><span class="material-symbols-outlined text-sm font-black">send</span></button>
+                        </div>
+                    </div>
                 <?php else: ?>
-                    <div class="glass-card p-12 rounded-[50px] text-center border-dashed border-2 border-white/10">
-                        <p class="text-[11px] text-white/40 mb-8 italic">No Circle Established.</p>
+                    <div class="glass-card p-12 rounded-[50px] text-center border-dashed border-2 border-white/10 space-y-4">
+                        <p class="text-[11px] text-white/40 italic">No Circle Established.</p>
                         <button onclick="openCircleEstablishModal()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black italic uppercase text-xs">Establish Unit</button>
+                        <button onclick="openCircleJoinModal()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl font-black italic uppercase text-xs">Join com ID de Convite</button>
                     </div>
                 <?php endif; ?>
             </div>
@@ -332,7 +361,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
 
         <div id="profile" class="tab-content space-y-8 text-center pt-8">
             <div class="relative w-32 h-32 mx-auto"><img src="<?= $userPic ?>" class="w-full h-full rounded-full border-4 border-faf-neon p-1 bg-zinc-900 shadow-2xl object-cover" referrerpolicy="no-referrer"></div>
-            <div class="space-y-1"><h3 class="text-4xl font-headline font-black italic uppercase tracking-tighter italic leading-none"><?= $userName ?></h3><p class="text-[10px] font-black text-faf-neon uppercase tracking-[0.3em] italic">Athlete ID: #<?= str_pad($user_id, 4, '0', STR_PAD_LEFT) ?></p></div>
+            <div class="space-y-1"><h3 class="text-4xl font-headline font-black italic uppercase tracking-tighter italic leading-none"><?= e($userName) ?></h3><p class="text-[10px] font-black text-faf-neon uppercase tracking-[0.3em] italic">Athlete ID: #<?= str_pad($user_id, 4, '0', STR_PAD_LEFT) ?></p></div>
             
             <div class="px-6"><div class="glass-card p-8 rounded-[50px] bg-gradient-to-br from-white/5 to-transparent flex flex-col items-center"><div class="bg-white p-4 rounded-[35px] shadow-[0_0_40px_rgba(195,244,0,0.3)]"><canvas id="neural-qr"></canvas></div><p class="mt-8 text-[9px] font-black text-faf-neon uppercase italic tracking-widest opacity-60">Scan to Sync Syndicate</p></div></div>
 
@@ -360,7 +389,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             <div class="space-y-4 max-h-[300px] overflow-y-auto">
                 <?php while($req = $notifications->fetch_assoc()): ?>
                 <div class="flex items-center justify-between bg-white/5 p-4 rounded-2xl border-l-2 border-faf-neon">
-                    <p class="text-xs font-black italic uppercase"><?= $req['name'] ?></p>
+                    <p class="text-xs font-black italic uppercase"><?= e($req['name']) ?></p>
                     <div class="flex gap-2">
                         <button onclick="handleFriend('accept', <?= $req['athlete_id'] ?>)" class="bg-faf-neon text-black p-2 rounded-xl"><span class="material-symbols-outlined text-sm font-black">done</span></button>
                         <button onclick="handleFriend('delete', <?= $req['athlete_id'] ?>)" class="bg-white/10 text-white/40 p-2 rounded-xl"><span class="material-symbols-outlined text-sm font-black">close</span></button>
@@ -536,6 +565,47 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             });
         }
 
+        async function openCircleJoinModal() {
+            showNeuralModal("Join Circle", "Introduz o ID de convite do Circle.", true, async (code) => {
+                if(!code) return;
+                const res = await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'join', invite_code: code }) });
+                const data = await res.json();
+                if(data.success) location.reload();
+                else alert(data.error || 'Circle não encontrado.');
+            });
+        }
+
+        function escapeHtml(str) {
+            const d = document.createElement('div');
+            d.innerText = str ?? '';
+            return d.innerHTML;
+        }
+
+        async function loadCircleFeed() {
+            const list = document.getElementById('circle-feed-list');
+            if (!list) return;
+            const res = await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'get_messages' }) });
+            const data = await res.json();
+            if (!data.success) return;
+            list.innerHTML = data.messages.map(m => {
+                if (m.type === 'user_action') {
+                    return `<div class="text-xs"><span class="font-black text-faf-neon uppercase italic">${escapeHtml(m.name || 'Atleta')}:</span> <span class="text-white/70">${escapeHtml(m.message)}</span></div>`;
+                }
+                const color = m.type === 'alert' ? 'text-red-500' : 'text-white/40';
+                return `<div class="text-[10px] italic ${color}">${escapeHtml(m.message)}</div>`;
+            }).join('') || `<p class="text-[10px] text-white/20 text-center py-6 italic">Sem atividade ainda.</p>`;
+            list.scrollTop = list.scrollHeight;
+        }
+
+        async function sendCircleMessage() {
+            const input = document.getElementById('circle-feed-input');
+            const message = input.value.trim();
+            if (!message) return;
+            input.value = '';
+            await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'send_message', message }) });
+            loadCircleFeed();
+        }
+
         async function handleFriend(action, friendId) {
             const res = await fetch('../src/api/social_engine.php', { method: 'POST', body: JSON.stringify({ action: action, friend_id: friendId }) });
             const data = await res.json();
@@ -550,9 +620,40 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         // --- RESTANTE JS MANTIDO ---
         function openCoachChat() { document.getElementById('coach-overlay').classList.add('active'); }
         function closeCoachChat() { document.getElementById('coach-overlay').classList.remove('active'); }
-        async function sendMessage() { /* ... código original ... */ }
-        async function submitWorkoutFeedback() { /* ... código original ... */ }
-        function focusDay(day) { /* ... código original ... */ }
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            const container = document.getElementById('chat-messages');
+            if (!input.value.trim()) return;
+            const msg = input.value; input.value = '';
+            const userDiv = document.createElement('div'); userDiv.className = 'user-bubble'; userDiv.innerText = msg; container.appendChild(userDiv);
+            const loading = document.createElement('div'); loading.className = 'coach-bubble opacity-50'; loading.innerText = 'Neural Process...'; container.appendChild(loading);
+            try {
+                const response = await fetch('../src/engines/ai_engine.php', { method: 'POST', body: JSON.stringify({ message: msg }) });
+                const data = await response.json(); container.removeChild(loading);
+                const coachDiv = document.createElement('div'); coachDiv.className = 'coach-bubble italic'; coachDiv.innerText = data.reply;
+                container.appendChild(coachDiv); container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            } catch (e) { loading.innerText = "Connection Error."; }
+        }
+        async function submitWorkoutFeedback() {
+            const data = {
+                id: document.getElementById('modal_workout_id').value,
+                status: document.getElementById('workout_status').value,
+                dist: document.getElementById('modal_real_dist').value,
+                pace: document.getElementById('modal_real_pace').value,
+                effort: document.querySelector('input[name="effort_level"]:checked').value
+            };
+            await fetch('../src/api/checkin_engine.php', { method: 'POST', body: JSON.stringify(data) });
+            location.reload();
+        }
+        function toggleFeedbackFields() { document.getElementById('feedback_fields').style.display = (document.getElementById('workout_status').value === 'completed') ? 'block' : 'none'; }
+        function focusDay(day) {
+            document.querySelectorAll('.day-item').forEach(el => el.classList.remove('selected', 'opacity-100'));
+            const target = document.querySelector(`.day-item[data-day="${day}"]`);
+            if(target) target.classList.add('selected');
+            document.querySelectorAll('.workout-card').forEach(card => { card.classList.remove('focused'); card.classList.add('minimized'); });
+            const selectedCard = document.getElementById(`card-${day}`);
+            if(selectedCard) { selectedCard.classList.add('focused'); selectedCard.classList.remove('minimized'); document.getElementById('app-main').scrollTo({ top: selectedCard.offsetTop - 15, behavior: 'smooth' }); }
+        }
         function switchTab(id) {
             document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('nav button').forEach(b => b.classList.remove('nav-active', 'text-faf-neon'));
@@ -565,6 +666,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             document.getElementById('club-circle-hub').classList.toggle('hidden', sub !== 'circle');
             document.getElementById('btn-club-syn').className = sub === 'syndicate' ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon" : "pb-3 text-xs font-black uppercase italic text-white/30";
             document.getElementById('btn-club-cir').className = sub === 'circle' ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon" : "pb-3 text-xs font-black uppercase italic text-white/30";
+            if (sub === 'circle') loadCircleFeed();
         }
         function toggleInbox() { const el = document.getElementById('neural-inbox'); el.style.display = (el.style.display === 'flex') ? 'none' : 'flex'; }
         function toggleSearch() { const el = document.getElementById('search-overlay'); el.style.display = (el.style.display === 'flex') ? 'none' : 'flex'; }
@@ -572,7 +674,11 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         function closeAbortModal() { document.getElementById('abort-modal').style.display = 'none'; }
         function openCheckIn(id, type, dist) { document.getElementById('modal_workout_id').value = id; document.getElementById('modal_real_dist').value = dist; document.getElementById('feedback-modal').style.display = 'flex'; }
         function closeCheckIn() { document.getElementById('feedback-modal').style.display = 'none'; }
-        const syncOrder = async () => { /* ... código original ... */ };
+        const syncOrder = async () => {
+            const days = Array.from(document.querySelectorAll('.day-item')).map(i => i.getAttribute('data-day'));
+            await fetch('../src/api/reorder_engine.php', { method: 'POST', body: JSON.stringify({week: <?= $current_week ?>, days_order: days}) });
+            location.reload();
+        };
         Sortable.create(document.getElementById('days-nav'), { animation: 300, onEnd: syncOrder });
         Sortable.create(document.getElementById('drag-container'), { animation: 400, handle: ".drag-handle", onEnd: syncOrder });
         document.getElementById('chat-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
