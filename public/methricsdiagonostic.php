@@ -30,6 +30,11 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
         .mission-glow { box-shadow: 0 0 20px rgba(195, 244, 0, 0.1); border-color: rgba(195, 244, 0, 0.2) !important; }
         .shake { animation: shake 0.4s ease-in-out; }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+        input:focus, button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(195, 244, 0, 0.5); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%); background-size: 400% 100%; animation: skeleton-pulse 1.4s ease infinite; border-radius: 12px; }
+        @keyframes skeleton-pulse { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; } }
     </style>
 </head>
 <body class="antialiased">
@@ -235,6 +240,8 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
                 const q = input.value.trim();
                 const results = document.getElementById('race-results');
                 if (q.length < 2) { results.classList.add('hidden'); results.innerHTML = ''; return; }
+                results.innerHTML = `<div class="skeleton h-10 w-full"></div>`;
+                results.classList.remove('hidden');
                 raceSearchTimer = setTimeout(async () => {
                     const res = await fetch('../src/api/race_search.php?q=' + encodeURIComponent(q));
                     const data = await res.json();

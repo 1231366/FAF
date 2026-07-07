@@ -157,6 +157,10 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         .nav-active { color: #c3f400 !important; background: rgba(195, 244, 0, 0.1); border-radius: 20px; }
         .drag-handle { cursor: grab; }
         #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+        input:focus, textarea:focus, button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(195, 244, 0, 0.5); }
+        .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%); background-size: 400% 100%; animation: skeleton-pulse 1.4s ease infinite; border-radius: 12px; }
+        @keyframes skeleton-pulse { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; } }
 
         /* Coach Overlay */
         #coach-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(12px); z-index: 4000; align-items: center; justify-content: center; padding: 20px; }
@@ -248,7 +252,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                     $icon = (strpos($tipo_w, 'long') !== false) ? 'terrain' : ((strpos($tipo_w, 'easy') !== false) ? 'favorite' : 'bolt');
                     if($concluido) $icon = 'check_circle';
                 ?>
-                <div data-day="<?= $dia ?>" id="card-<?= $dia ?>" class="workout-card <?= $isTarget ? 'focused' : 'minimized' ?>" style="z-index: <?= 50 - $idx ?>;" onclick="focusDay('<?= $dia ?>')">
+                <div data-day="<?= $dia ?>" id="card-<?= $dia ?>" class="workout-card cursor-pointer <?= $isTarget ? 'focused' : 'minimized' ?>" style="z-index: <?= 50 - $idx ?>;" onclick="focusDay('<?= $dia ?>')">
                     <div class="glass-card rounded-[40px] p-7 shadow-2xl relative overflow-hidden">
                         <div class="flex justify-between items-start mb-4">
                             <div><p class="text-[11px] font-black uppercase text-faf-neon italic tracking-widest mb-1"><?= $dia ?></p><h4 class="text-3xl font-headline font-black italic uppercase leading-none"><?= $w['workout_type'] ?></h4></div>
@@ -438,7 +442,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                     <label class="cursor-pointer"><input type="radio" name="effort_level" value="hard" class="hidden peer"><div class="p-3 rounded-2xl border border-white/10 text-[9px] font-black text-center peer-checked:bg-red-500/20 peer-checked:border-red-500 transition-all uppercase text-red-500">Hard</div></label>
                 </div>
             </div>
-            <button onclick="submitWorkoutFeedback()" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Sincronizar</button>
+            <button id="btn-submit-feedback" onclick="submitWorkoutFeedback()" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg transition-opacity disabled:opacity-50">Sincronizar</button>
         </div>
     </div>
 
@@ -507,6 +511,8 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
 
         // AJAX FEEDBACK
         async function submitWorkoutFeedback() {
+            const btn = document.getElementById('btn-submit-feedback');
+            btn.disabled = true; btn.innerText = 'A sincronizar...';
             const data = {
                 id: document.getElementById('modal_workout_id').value,
                 status: document.getElementById('workout_status').value,
@@ -549,8 +555,11 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             document.getElementById('gmodal-body').innerText = body;
             inputContainer.classList.toggle('hidden', !isInput);
             m.style.display = 'flex';
-            document.getElementById('gmodal-confirm').onclick = async () => {
+            const confirmBtn = document.getElementById('gmodal-confirm');
+            confirmBtn.disabled = false; confirmBtn.innerText = 'Execute'; confirmBtn.classList.remove('disabled:opacity-50');
+            confirmBtn.onclick = async () => {
                 const val = document.getElementById('gmodal-field').value;
+                confirmBtn.disabled = true; confirmBtn.innerText = '...'; confirmBtn.classList.add('disabled:opacity-50');
                 await onConfirm(val);
                 m.style.display = 'none';
             };
@@ -609,6 +618,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         async function loadCircleFeed() {
             const list = document.getElementById('circle-feed-list');
             if (!list) return;
+            list.innerHTML = `<div class="skeleton h-4 w-3/4"></div><div class="skeleton h-4 w-1/2"></div><div class="skeleton h-4 w-2/3"></div>`;
             const res = await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'get_messages' }) });
             const data = await res.json();
             if (!data.success) return;

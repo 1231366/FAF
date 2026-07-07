@@ -53,6 +53,9 @@ $google_login_url = $client->createAuthUrl();
         .social-btn { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; gap: 0.75rem; width: 100%; border-radius: 1rem; padding: 1rem 0; }
         .social-btn:hover { background: rgba(255,255,255,0.05); border-color: rgba(204, 255, 0, 0.4); transform: translateY(-2px); }
         input:focus { border-color: #CCFF00 !important; box-shadow: 0 0 15px rgba(204, 255, 0, 0.1) !important; }
+        button:focus-visible, a:focus-visible { outline: 2px solid #CCFF00; outline-offset: 2px; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; } }
     </style>
 </head>
 <body class="min-h-screen flex items-center justify-center p-6">
@@ -154,7 +157,15 @@ $google_login_url = $client->createAuthUrl();
             } else {
                 document.getElementById('socialButtons').style.display = 'block';
             }
-        } 
+        }
+
+        // Feedback visual imediato ao submeter (evita duplo-clique e sensação de app travada)
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', () => {
+                const btn = form.querySelector('button[type="submit"]');
+                if (btn) { btn.disabled = true; btn.dataset.originalText = btn.innerHTML; btn.innerHTML = 'A processar...'; }
+            });
+        });
     </script>
 </body>
 </html>
