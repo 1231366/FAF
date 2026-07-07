@@ -36,7 +36,7 @@ class AiEngine {
         6. LIMITE: Máximo 45 palavras. Sê cirúrgico.";
 
         $data = [
-            'model' => 'llama-3.3-70b-versatile',
+            'model' => 'meta-llama/llama-4-scout-17b-16e-instruct',
             'messages' => [
                 ['role' => 'system', 'content' => $systemPrompt],
                 ['role' => 'user', 'content' => $message]
@@ -85,13 +85,15 @@ class AiEngine {
             $lines[] = "{$i}|{$w['type']}|" . round($w['dist'], 1) . "km|{$w['pace']}/km|{$w['phase']}";
         }
 
-        $systemPrompt = "Reescreve, em PT-PT, a descrição de cada treino de corrida listado abaixo "
-            . "(formato indice|tipo|distancia|pace|fase). Mantém EXATAMENTE os números e o objetivo "
-            . "fisiológico do tipo de treino — varia só o tom e a motivação, frases curtas (máx 20 palavras). "
-            . "Responde SÓ com um array JSON de strings, na mesma ordem e com o mesmo tamanho da lista, sem mais texto.";
+        $systemPrompt = "Cada linha de input tem o formato indice|tipo|distancia|pace|fase (ex: \"0|LONGÃO|8km|6:00/km|BASE\"). "
+            . "Para cada linha, escreve APENAS uma frase motivacional curta em PT-PT (máx 20 palavras) que descreva esse treino, "
+            . "mantendo o objetivo fisiológico do tipo. NUNCA incluas o índice, o tipo, a distância, o pace ou o caractere '|' "
+            . "no texto de saída — só a frase. Exemplo de output correto para duas linhas: "
+            . "[\"Ritmo confortável para construir a tua base de resistência.\", \"Recuperação ativa para limpar o lactato.\"]. "
+            . "Responde SÓ com esse array JSON de strings, na mesma ordem e tamanho do input, sem mais texto.";
 
         $data = [
-            'model' => 'llama-3.3-70b-versatile',
+            'model' => 'meta-llama/llama-4-scout-17b-16e-instruct',
             'messages' => [
                 ['role' => 'system', 'content' => $systemPrompt],
                 ['role' => 'user', 'content' => implode("\n", $lines)]
@@ -122,7 +124,11 @@ class AiEngine {
 
         if (!is_array($rewritten) || count($rewritten) !== count($workouts)) return $fallback;
         foreach ($rewritten as $r) {
-            if (!is_string($r) || trim($r) === '') return $fallback;
+            // Rejeita a resposta inteira se alguma linha ainda tiver a cara do
+            // formato de input (índice|tipo|dist|pace) em vez de texto motivacional.
+            if (!is_string($r) || trim($r) === '' || str_contains($r, '|') || preg_match('/^\d+[\s|]/', trim($r))) {
+                return $fallback;
+            }
         }
         return array_values($rewritten);
     }
