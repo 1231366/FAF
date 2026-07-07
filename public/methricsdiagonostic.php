@@ -41,6 +41,7 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
         <input type="hidden" name="volume_atual" id="f-volume-atual">
         <input type="hidden" name="target_dist" id="f-target-dist">
         <input type="hidden" name="race_date" id="f-race-date">
+        <input type="hidden" name="race_name" id="f-race-name">
         <input type="hidden" name="target_pace" id="f-target-pace">
         <input type="hidden" name="current_pb_dist" id="f-pb-dist">
         <input type="hidden" name="current_pb_pace" id="f-pb-pace">
@@ -126,7 +127,19 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
                 <?php endforeach; ?>
             </div>
 
-            <div id="step4" class="step-content space-y-6">
+            <div id="step4" class="step-content space-y-4">
+                <div class="glass-card p-5 rounded-[35px] relative">
+                    <span class="text-[9px] font-black uppercase text-white/30 block mb-2 italic">Vais correr uma prova específica?</span>
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined text-white/20">search</span>
+                        <input type="text" id="in-race-search" placeholder="Pesquisar prova (opcional)..." autocomplete="off" class="flex-1 bg-transparent text-sm font-semibold italic outline-none text-white placeholder:text-white/20">
+                    </div>
+                    <div id="race-results" class="hidden mt-3 space-y-2 max-h-[180px] overflow-y-auto"></div>
+                    <div id="race-selected" class="hidden mt-3 p-3 rounded-2xl bg-faf-neon/10 border border-faf-neon/30 flex justify-between items-center">
+                        <span id="race-selected-label" class="text-xs font-black italic text-faf-neon uppercase"></span>
+                        <span onclick="clearRaceSelection()" class="material-symbols-outlined text-white/40 cursor-pointer text-lg">close</span>
+                    </div>
+                </div>
                 <div class="glass-card p-10 rounded-[45px] text-center border border-faf-neon/20">
                     <span class="text-[10px] font-black uppercase text-faf-neon tracking-[0.4em] block mb-4 italic">Target Date</span>
                     <input type="date" id="in-race-date" class="w-full bg-transparent text-4xl font-black italic outline-none text-center tracking-tighter text-white">
@@ -206,6 +219,55 @@ if(!isset($_SESSION['user_id'])) { header("Location: login.php"); exit(); }
             today.setHours(0, 0, 0, 0);
             if(chosenDate <= today) return showError("A prova tem de ser no futuro, campeão!");
             nextStep();
+        }
+
+        function escapeHtml(str) {
+            const d = document.createElement('div');
+            d.innerText = str ?? '';
+            return d.innerHTML;
+        }
+
+        let raceSearchTimer = null;
+        document.addEventListener('DOMContentLoaded', () => {
+            const input = document.getElementById('in-race-search');
+            input.addEventListener('input', () => {
+                clearTimeout(raceSearchTimer);
+                const q = input.value.trim();
+                const results = document.getElementById('race-results');
+                if (q.length < 2) { results.classList.add('hidden'); results.innerHTML = ''; return; }
+                raceSearchTimer = setTimeout(async () => {
+                    const res = await fetch('../src/api/race_search.php?q=' + encodeURIComponent(q));
+                    const data = await res.json();
+                    if (!data.success || data.races.length === 0) {
+                        results.innerHTML = `<p class="text-[10px] text-white/20 italic px-2">Sem resultados. Podes sempre escolher a data à mão.</p>`;
+                        results.classList.remove('hidden');
+                        return;
+                    }
+                    results.innerHTML = data.races.map(r => {
+                        const d = new Date(r.race_date).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' });
+                        return `<div onclick="selectRace('${escapeHtml(r.name).replace(/'/g, "\\'")}', '${r.race_date}', ${r.distance_km})" class="glass-card p-3 rounded-2xl cursor-pointer flex justify-between items-center">
+                            <div><span class="block text-xs font-black italic uppercase">${escapeHtml(r.name)}</span><span class="text-[9px] text-white/30">${escapeHtml(r.city || '')}</span></div>
+                            <span class="text-[10px] font-black text-faf-neon italic">${d} · ${Math.round(r.distance_km)}km</span>
+                        </div>`;
+                    }).join('');
+                    results.classList.remove('hidden');
+                }, 300);
+            });
+        });
+
+        function selectRace(name, date, distanceKm) {
+            document.getElementById('f-race-name').value = name;
+            document.getElementById('f-target-dist').value = Math.round(distanceKm);
+            document.getElementById('in-race-date').value = date;
+            document.getElementById('race-selected-label').innerText = name;
+            document.getElementById('race-selected').classList.remove('hidden');
+            document.getElementById('race-results').classList.add('hidden');
+            document.getElementById('in-race-search').value = '';
+        }
+
+        function clearRaceSelection() {
+            document.getElementById('f-race-name').value = '';
+            document.getElementById('race-selected').classList.add('hidden');
         }
 
         function validateStep5() {
