@@ -12,6 +12,17 @@ $user_id = $_SESSION['user_id'];
 // antes de o imprimir em HTML.
 function e($str) { return htmlspecialchars($str ?? '', ENT_QUOTES, 'UTF-8'); }
 
+// URL de avatar com fallback: se o utilizador não tem foto (registo por email,
+// não Google), gera um avatar determinístico a partir do nome.
+function avatar($pic, $name) {
+    if (!empty($pic)) return e($pic);
+    return 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($name ?? 'FAF');
+}
+
+// Briefing pós-onboarding: mostrado uma única vez, logo após o plano ser gerado
+$show_briefing = !empty($_SESSION['plan_generated_now']);
+unset($_SESSION['plan_generated_now']);
+
 /**
  * 1. DATA LAYER
  */
@@ -110,8 +121,89 @@ foreach($ordem_dias as $d) {
     }
 }
 
+/**
+ * 3b. ANALYTICS LAYER — métricas reais calculadas a partir do plano e dos check-ins
+ */
+$vdot = round(calculateVdot((float)($userData['ref_dist'] ?? 5), paceToSec($userData['ref_pace'] ?? '25:00')), 1);
+
+// Volume e execução por semana (alimenta a onda do header e o gráfico do Neural Data)
+$stmt_wk = $conn->prepare("SELECT week_number,
+        SUM(distance) planned_km,
+        SUM(CASE WHEN status='completed' THEN COALESCE(real_distance, distance) ELSE 0 END) done_km,
+        SUM(status='completed') done_cnt,
+        SUM(status='skipped') skip_cnt,
+        SUM(status='pending' AND workout_date < CURDATE()) overdue_cnt,
+        MAX(phase) phase, MAX(is_deload) is_deload
+    FROM training_plans WHERE user_id = ? GROUP BY week_number ORDER BY week_number");
+$stmt_wk->bind_param("i", $user_id);
+$stmt_wk->execute();
+$cycle_weeks = $stmt_wk->get_result()->fetch_all(MYSQLI_ASSOC);
+
+$total_done_km = 0; $done_cnt = 0; $skip_cnt = 0; $overdue_cnt = 0;
+foreach ($cycle_weeks as $cw_row) {
+    $total_done_km += (float)$cw_row['done_km'];
+    $done_cnt += (int)$cw_row['done_cnt'];
+    $skip_cnt += (int)$cw_row['skip_cnt'];
+    $overdue_cnt += (int)$cw_row['overdue_cnt'];
+}
+$closed_cnt = $done_cnt + $skip_cnt + $overdue_cnt;
+$consistency = ($closed_cnt > 0) ? round(($done_cnt / $closed_cnt) * 100) : 100;
+$max_week_km = max(array_merge([1], array_map(fn($r) => (float)$r['planned_km'], $cycle_weeks)));
+
+// Readiness: heurística simples nos últimos 14 dias — skips pesam muito,
+// esforço 'hard' repetido pesa um pouco, 'easy' recupera.
+$stmt_rec = $conn->prepare("SELECT
+        SUM(status='skipped') skips,
+        SUM(status='completed' AND effort_level='hard') hards,
+        SUM(status='completed' AND effort_level='easy') easies
+    FROM training_plans WHERE user_id = ? AND workout_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) AND workout_date <= CURDATE()");
+$stmt_rec->bind_param("i", $user_id);
+$stmt_rec->execute();
+$rec = $stmt_rec->get_result()->fetch_assoc();
+$readiness = max(40, min(100, 100 - 12 * (int)$rec['skips'] - 6 * (int)$rec['hards'] + 2 * (int)$rec['easies']));
+
+// Streak pessoal: treinos consecutivos concluídos, do mais recente para trás
+$stmt_stk = $conn->prepare("SELECT status FROM training_plans WHERE user_id = ? AND workout_date <= CURDATE() ORDER BY workout_date DESC LIMIT 40");
+$stmt_stk->bind_param("i", $user_id);
+$stmt_stk->execute();
+$personal_streak = 0;
+foreach ($stmt_stk->get_result()->fetch_all(MYSQLI_ASSOC) as $row_s) {
+    if ($row_s['status'] === 'completed') $personal_streak++;
+    else break;
+}
+
+// Countdown para a prova
+$race_days_left = null;
+$race_label_hdr = $target_label;
+if (!empty($userData['race_date'])) {
+    $diff = (new DateTime('today'))->diff(new DateTime($userData['race_date']));
+    if (!$diff->invert) $race_days_left = $diff->days;
+}
+if (!empty($userData['race_name'])) $race_label_hdr = mb_strtoupper($userData['race_name']);
+
+// Cores por fase do ciclo (usadas nos chips dos cards e na timeline do Neural Data)
+function phaseColor($phase) {
+    return ['BASE' => '#38bdf8', 'BUILD' => '#c3f400', 'PEAK' => '#f97316', 'TAPER' => '#a78bfa'][$phase] ?? '#ffffff';
+}
+
+// Contexto da semana atual para a mensagem do coach
+$week_is_deload = false; $week_phase = null;
+foreach ($cycle_weeks as $cw_row) {
+    if ((int)$cw_row['week_number'] === $current_week) {
+        $week_is_deload = (bool)$cw_row['is_deload'];
+        $week_phase = $cw_row['phase'];
+        break;
+    }
+}
+
 $workout_hoje = $weekly_workouts[$hoje_nome] ?? null;
-$coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca no ritmo." : "Hey $first_name! Hoje o asfalto descansa.";
+if ($workout_hoje) {
+    $coach_msg = "Hey $first_name! Hoje: {$workout_hoje['workout_type']}. Foca no ritmo.";
+    if ($week_is_deload) $coach_msg = "Hey $first_name! Semana de descarga — hoje é {$workout_hoje['workout_type']}, mas o objetivo é recuperar. Não acelerar.";
+    elseif ($week_phase === 'TAPER') $coach_msg = "Hey $first_name! Taper ativo. {$workout_hoje['workout_type']} curto e afiado — as pernas estão a carregar.";
+} else {
+    $coach_msg = "Hey $first_name! Hoje o asfalto descansa. A adaptação acontece no repouso.";
+}
 ?>
 <!DOCTYPE html>
 <html class="dark" lang="pt">
@@ -156,7 +248,8 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         ::-webkit-scrollbar { display: none; }
         .nav-active { color: #c3f400 !important; background: rgba(195, 244, 0, 0.1); border-radius: 20px; }
         .drag-handle { cursor: grab; }
-        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal, #briefing-modal, #success-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+        #briefing-modal .briefing-card { max-height: 85vh; overflow-y: auto; }
         input:focus, textarea:focus, button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(195, 244, 0, 0.5); }
         .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%); background-size: 400% 100%; animation: skeleton-pulse 1.4s ease infinite; border-radius: 12px; }
         @keyframes skeleton-pulse { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
@@ -176,10 +269,11 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     <header class="pt-[var(--safe-top)] px-6 bg-black border-b border-white/5">
         <div class="py-4 flex justify-between items-center">
             <div class="flex items-center gap-3">
-                <img src="<?= $userPic ?>" class="w-9 h-9 rounded-full border border-faf-neon/30 object-cover" referrerpolicy="no-referrer">
+                <img src="<?= $userPic ?>" class="w-9 h-9 rounded-full border border-faf-neon/30 object-cover" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'">
                 <h1 class="text-xl font-headline font-black italic uppercase tracking-tighter">FAF<span class="text-faf-neon">.</span></h1>
             </div>
             <div class="flex items-center gap-4">
+                <span onclick="openBriefing()" class="material-symbols-outlined text-white/40 text-2xl cursor-pointer" aria-label="Como funciona o plano">help</span>
                 <div onclick="toggleInbox()" class="relative cursor-pointer">
                     <span class="material-symbols-outlined text-white/40 text-2xl">notifications</span>
                     <?php if($notif_count > 0): ?><div class="absolute -top-1 -right-1 w-4 h-4 bg-faf-neon rounded-full flex items-center justify-center text-[10px] text-black font-black"><?= $notif_count ?></div><?php endif; ?>
@@ -191,16 +285,28 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
         <div id="run-header-extras" class="pb-4 space-y-4">
             <div class="flex justify-between items-start">
                 <div>
-                    <p class="text-[10px] font-black uppercase text-faf-neon tracking-[0.2em] italic mb-0.5"><?= $target_label ?> MISSION</p>
+                    <p class="text-[10px] font-black uppercase text-faf-neon tracking-[0.2em] italic mb-0.5"><?= e($race_label_hdr) ?> MISSION</p>
                     <h2 class="text-2xl font-headline font-black italic uppercase tracking-tighter leading-none italic">Neural Protocol</h2>
                 </div>
+                <?php if($race_days_left !== null): ?>
+                <div class="text-right">
+                    <p class="text-3xl font-headline font-black italic text-faf-neon leading-none"><?= $race_days_left ?></p>
+                    <p class="text-[8px] font-black uppercase tracking-[0.2em] text-white/40 italic">dias p/ prova</p>
+                </div>
+                <?php endif; ?>
             </div>
-            
-            <div class="flex items-end gap-1.5 h-4">
-                <?php $active_bars = (int)(($current_week / $total_cycle_weeks) * 20); if($active_bars < 1) $active_bars = 1;
-                for($i=1; $i<=20; $i++): ?>
-                    <div class="flex-1 rounded-sm <?= ($i <= $active_bars) ? 'bg-faf-neon shadow-[0_0_8px_#c3f400]' : 'bg-white/10' ?> h-<?= rand(2,4) ?>"></div>
-                <?php endfor; ?>
+
+            <!-- Onda real de volume do ciclo: cada barra é uma semana (vê-se a periodização) -->
+            <div class="flex items-end gap-1 h-6">
+                <?php foreach($cycle_weeks as $cw_row):
+                    $wk = (int)$cw_row['week_number'];
+                    $hpct = 25 + round(((float)$cw_row['planned_km'] / $max_week_km) * 75);
+                    if ($wk < $current_week)      $bar = 'bg-faf-neon/50';
+                    elseif ($wk == $current_week) $bar = 'bg-faf-neon shadow-[0_0_8px_#c3f400]';
+                    else                          $bar = ((int)$cw_row['is_deload']) ? 'bg-white/5' : 'bg-white/10';
+                ?>
+                    <div onclick="window.location.href='?week=<?= $wk ?>'" class="flex-1 rounded-sm cursor-pointer transition-all hover:opacity-80 <?= $bar ?>" style="height: <?= $hpct ?>%"></div>
+                <?php endforeach; ?>
             </div>
 
             <div onclick="openCoachChat()" class="flex gap-3 items-center bg-white/5 p-3 rounded-2xl border border-white/5 cursor-pointer active:scale-95 transition-all">
@@ -254,30 +360,138 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 ?>
                 <div data-day="<?= $dia ?>" id="card-<?= $dia ?>" class="workout-card cursor-pointer <?= $isTarget ? 'focused' : 'minimized' ?>" style="z-index: <?= 50 - $idx ?>;" onclick="focusDay('<?= $dia ?>')">
                     <div class="glass-card rounded-[40px] p-7 shadow-2xl relative overflow-hidden">
-                        <div class="flex justify-between items-start mb-4">
+                        <div class="flex justify-between items-start mb-3">
                             <div><p class="text-[11px] font-black uppercase text-faf-neon italic tracking-widest mb-1"><?= $dia ?></p><h4 class="text-3xl font-headline font-black italic uppercase leading-none"><?= $w['workout_type'] ?></h4></div>
                             <div class="drag-handle w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center"><span class="material-symbols-outlined text-faf-neon text-2xl"><?= $icon ?></span></div>
                         </div>
+
+                        <?php if(!empty($w['phase']) || !empty($w['intensity_zone']) || !empty($w['is_deload'])): ?>
+                        <div class="flex gap-2 mb-4">
+                            <?php if(!empty($w['phase'])): $pc = phaseColor($w['phase']); ?>
+                                <span class="text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border italic" style="color: <?= $pc ?>; border-color: <?= $pc ?>40; background: <?= $pc ?>12;"><?= $w['phase'] ?></span>
+                            <?php endif; ?>
+                            <?php if(!empty($w['intensity_zone'])): ?>
+                                <span class="text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-white/15 bg-white/5 text-white/60 italic">Z<?= (int)$w['intensity_zone'] ?></span>
+                            <?php endif; ?>
+                            <?php if(!empty($w['is_deload'])): ?>
+                                <span class="text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-sky-400/40 bg-sky-400/10 text-sky-300 italic">Deload</span>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+
                         <div class="mb-6"><p class="text-[10px] text-white/50 font-medium leading-relaxed italic"><?= !empty($w['description']) ? $w['description'] : 'Foco na manutenção aeróbica.' ?></p></div>
+
+                        <?php if($concluido): ?>
+                        <div class="bg-faf-neon/5 border border-faf-neon/20 rounded-3xl p-4 mb-6 grid grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-[8px] font-black text-white/20 uppercase italic mb-1">Target</p>
+                                <p class="text-xs font-black text-white/60 italic"><?= number_format($w['distance'], 1) ?>k @ <?= $w['pace'] ?></p>
+                            </div>
+                            <div class="border-l border-white/10 pl-4">
+                                <p class="text-[8px] font-black text-faf-neon uppercase italic mb-1">Real</p>
+                                <p class="text-xs font-black text-faf-neon italic"><?= number_format((float)($w['real_distance'] ?? $w['distance']), 1) ?>k @ <?= $w['real_pace'] ?? $w['pace'] ?></p>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+
                         <div class="flex justify-between items-center">
                             <div class="flex gap-6">
                                 <div><p class="text-[9px] text-white/30 uppercase font-black italic">Distância</p><p class="text-xl font-black italic"><?= number_format($w['distance'] ?? 0, 1) ?>k</p></div>
                                 <div><p class="text-[9px] text-white/30 uppercase font-black italic">Target</p><p class="text-xl font-black italic text-faf-neon"><?= $w['pace'] ?? '0:00' ?></p></div>
                             </div>
-                            <?php if(!$concluido): ?><button onclick="openCheckIn(<?= $w['id'] ?>, '<?= $w['workout_type'] ?>', '<?= $w['distance'] ?>')" class="bg-faf-neon text-black font-black uppercase px-6 py-3 rounded-2xl text-[10px] italic shadow-lg active:scale-90 transition-all">Feedback</button><?php endif; ?>
+                            <?php if(!$concluido): ?>
+                                <button onclick="openCheckIn(<?= $w['id'] ?>, '<?= $w['workout_type'] ?>', '<?= $w['distance'] ?>')" class="bg-faf-neon text-black font-black uppercase px-6 py-3 rounded-2xl text-[10px] italic shadow-lg active:scale-90 transition-all">Feedback</button>
+                            <?php else: ?>
+                                <button data-type="<?= e($w['workout_type']) ?>" data-dist="<?= number_format((float)($w['real_distance'] ?? $w['distance']), 1) ?>" data-pace="<?= e($w['real_pace'] ?? $w['pace']) ?>" onclick="shareWorkout(this); event.stopPropagation();" class="w-12 h-12 rounded-2xl border border-faf-neon/40 text-faf-neon flex items-center justify-center active:scale-90 transition-all" aria-label="Partilhar treino">
+                                    <span class="material-symbols-outlined text-xl">ios_share</span>
+                                </button>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
                 <?php endforeach; ?>
+
+                <?php if(empty($weekly_workouts)): ?>
+                <div class="glass-card rounded-[40px] p-12 text-center border-dashed border-2 border-white/10 mt-6">
+                    <span class="material-symbols-outlined text-faf-neon/40 text-5xl mb-4">self_improvement</span>
+                    <h4 class="text-xl font-headline font-black italic uppercase tracking-tighter mb-2">Semana em branco</h4>
+                    <p class="text-[10px] text-white/40 italic leading-relaxed">Sem treinos agendados nesta semana.<br>Usa as setas ou faz swipe no calendário para navegar.</p>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
 
-        <div id="insights" class="tab-content space-y-8">
+        <div id="insights" class="tab-content space-y-6 pb-32">
             <h2 class="text-4xl font-headline font-black italic uppercase tracking-tighter pt-4">Neural Data</h2>
-            <div class="grid grid-cols-1 gap-4">
-                <div class="glass-card p-8 rounded-[40px] flex justify-between items-center"><p class="text-xs font-black text-white/40 uppercase italic">VO2 Max</p><p class="text-4xl font-black italic text-faf-neon">54.2</p></div>
-                <div class="glass-card p-8 rounded-[40px] flex justify-between items-center"><p class="text-xs font-black text-white/40 uppercase italic">Readiness</p><p class="text-4xl font-black italic">92%</p></div>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div class="glass-card p-6 rounded-[35px]">
+                    <p class="text-[9px] font-black text-white/30 uppercase italic tracking-widest mb-2">VDOT</p>
+                    <p class="text-4xl font-headline font-black italic text-faf-neon leading-none"><?= $vdot ?></p>
+                    <p class="text-[8px] text-white/20 uppercase font-black italic mt-2">Motor aeróbico (J. Daniels)</p>
+                </div>
+                <div class="glass-card p-6 rounded-[35px]">
+                    <p class="text-[9px] font-black text-white/30 uppercase italic tracking-widest mb-2">Readiness</p>
+                    <p class="text-4xl font-headline font-black italic leading-none <?= $readiness >= 80 ? 'text-faf-neon' : ($readiness >= 60 ? 'text-orange-400' : 'text-red-500') ?>"><?= $readiness ?>%</p>
+                    <p class="text-[8px] text-white/20 uppercase font-black italic mt-2">Últimos 14 dias</p>
+                </div>
+                <div class="glass-card p-6 rounded-[35px]">
+                    <p class="text-[9px] font-black text-white/30 uppercase italic tracking-widest mb-2">Consistência</p>
+                    <p class="text-4xl font-headline font-black italic leading-none"><?= $consistency ?>%</p>
+                    <p class="text-[8px] text-white/20 uppercase font-black italic mt-2"><?= $done_cnt ?> feitos · <?= $skip_cnt + $overdue_cnt ?> falhados</p>
+                </div>
+                <div class="glass-card p-6 rounded-[35px]">
+                    <p class="text-[9px] font-black text-white/30 uppercase italic tracking-widest mb-2">KM Reais</p>
+                    <p class="text-4xl font-headline font-black italic leading-none"><?= number_format($total_done_km, 1) ?></p>
+                    <p class="text-[8px] text-white/20 uppercase font-black italic mt-2">Streak pessoal: <?= $personal_streak ?> 🔥</p>
+                </div>
             </div>
+
+            <div class="glass-card p-6 rounded-[35px] space-y-4">
+                <div class="flex justify-between items-center">
+                    <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Volume Semanal</p>
+                    <div class="flex gap-4 text-[8px] font-black uppercase italic">
+                        <span class="text-white/30">▪ Plano</span>
+                        <span class="text-faf-neon">▪ Real</span>
+                    </div>
+                </div>
+                <div class="flex items-end gap-1.5 h-28">
+                    <?php foreach($cycle_weeks as $cw_row):
+                        $wk = (int)$cw_row['week_number'];
+                        $plan_h = max(4, round(((float)$cw_row['planned_km'] / $max_week_km) * 100));
+                        $done_h = max(0, round(((float)$cw_row['done_km'] / $max_week_km) * 100));
+                    ?>
+                    <div onclick="window.location.href='?week=<?= $wk ?>'" class="flex-1 h-full flex items-end justify-center relative cursor-pointer group">
+                        <div class="absolute bottom-0 w-full rounded-t-md bg-white/10 group-hover:bg-white/15 transition-colors" style="height: <?= $plan_h ?>%"></div>
+                        <?php if($done_h > 0): ?><div class="absolute bottom-0 w-full rounded-t-md bg-faf-neon/80" style="height: <?= $done_h ?>%"></div><?php endif; ?>
+                        <?php if($wk == $current_week): ?><div class="absolute -bottom-1 w-1.5 h-1.5 rounded-full bg-faf-neon shadow-[0_0_6px_#c3f400]"></div><?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <?php if(!empty(array_filter($cycle_weeks, fn($r) => !empty($r['phase'])))): ?>
+            <div class="glass-card p-6 rounded-[35px] space-y-4">
+                <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Ciclo de Periodização</p>
+                <div class="flex gap-1 h-3 rounded-full overflow-hidden">
+                    <?php foreach($cycle_weeks as $cw_row):
+                        $pc = phaseColor($cw_row['phase']);
+                        $op = ((int)$cw_row['week_number'] <= $current_week) ? '' : '55';
+                    ?>
+                    <div class="flex-1 <?= (int)$cw_row['week_number'] == $current_week ? 'ring-1 ring-white' : '' ?>" style="background: <?= $pc . ($op ? '' : '') ?>; opacity: <?= (int)$cw_row['week_number'] <= $current_week ? '1' : '0.3' ?>;"></div>
+                    <?php endforeach; ?>
+                </div>
+                <div class="flex justify-between text-[8px] font-black uppercase italic tracking-widest">
+                    <span style="color: #38bdf8">Base</span>
+                    <span style="color: #c3f400">Build</span>
+                    <span style="color: #f97316">Peak</span>
+                    <span style="color: #a78bfa">Taper</span>
+                </div>
+                <?php if($week_is_deload): ?>
+                <p class="text-[9px] text-sky-300 italic font-bold">⚡ Semana atual: DELOAD — o volume desce de propósito para o corpo absorver o treino.</p>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
         </div>
 
         <div id="club" class="tab-content space-y-6">
@@ -287,7 +501,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             <div id="club-syndicate-hub" class="space-y-4">
                 <?php foreach($my_friends as $f): ?>
                 <div class="glass-card p-5 rounded-[35px] flex items-center gap-5 border-l-4 border-faf-neon">
-                    <img src="<?= $f['profile_pic'] ?>" class="w-14 h-14 rounded-full border border-faf-neon/30 p-1">
+                    <img src="<?= avatar($f['profile_pic'], $f['name']) ?>" class="w-14 h-14 rounded-full border border-faf-neon/30 p-1 object-cover" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'">
                     <div class="flex-1"><p class="text-lg font-black italic uppercase leading-none"><?= e($f['name']) ?></p><p class="text-[10px] text-faf-neon mt-1 font-bold italic uppercase tracking-widest">ATHLETE SYNCED</p></div>
                 </div>
                 <?php endforeach; if(empty($my_friends)) echo "<p class='text-[10px] text-white/20 text-center py-10 italic'>No allies found.</p>"; ?>
@@ -314,7 +528,7 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                         <div class="flex justify-between items-center">
                             <div class="flex items-center gap-3">
                                 <span class="text-xs font-black text-faf-neon"><?= str_pad($idx+1, 2, '0', STR_PAD_LEFT) ?></span>
-                                <img src="<?= $m['profile_pic'] ?>" class="w-6 h-6 rounded-full">
+                                <img src="<?= avatar($m['profile_pic'], $m['name']) ?>" class="w-6 h-6 rounded-full object-cover" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'">
                                 <p class="text-xs font-black italic uppercase"><?= e($m['name']) ?></p>
                             </div>
                             <span class="text-xs font-black italic">ACTIVE</span>
@@ -331,23 +545,56 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                         </div>
                     </div>
                 <?php else: ?>
-                    <div class="glass-card p-12 rounded-[50px] text-center border-dashed border-2 border-white/10 space-y-4">
-                        <p class="text-[11px] text-white/40 italic">No Circle Established.</p>
-                        <button onclick="openCircleEstablishModal()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black italic uppercase text-xs">Establish Unit</button>
-                        <button onclick="openCircleJoinModal()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl font-black italic uppercase text-xs">Join com ID de Convite</button>
+                    <div class="text-center pt-4 pb-2">
+                        <div class="text-5xl mb-3">🔥</div>
+                        <h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter leading-none mb-2">O Fogo Espera</h3>
+                        <p class="text-[10px] text-white/40 italic leading-relaxed px-6">Um Circle é o teu clã de treino: se todos cumprirem os treinos do dia, o fogo cresce. Se alguém falhar... apaga-se. E toda a gente vê.</p>
+                    </div>
+                    <div onclick="openCircleEstablishModal()" class="glass-card p-6 rounded-[35px] flex items-center gap-5 cursor-pointer border-l-4 border-faf-neon active:scale-95 transition-all">
+                        <div class="w-14 h-14 rounded-2xl bg-faf-neon flex items-center justify-center flex-shrink-0"><span class="material-symbols-outlined text-black font-black text-2xl">add_circle</span></div>
+                        <div class="flex-1 text-left">
+                            <p class="text-base font-black italic uppercase leading-none">Fundar um Circle</p>
+                            <p class="text-[9px] text-white/40 mt-1.5 italic">Cria a tua unidade e recruta os teus aliados</p>
+                        </div>
+                        <span class="material-symbols-outlined text-white/20">chevron_right</span>
+                    </div>
+                    <div onclick="openCircleJoinModal()" class="glass-card p-6 rounded-[35px] flex items-center gap-5 cursor-pointer border-l-4 border-white/10 active:scale-95 transition-all">
+                        <div class="w-14 h-14 rounded-2xl bg-white/5 border border-faf-neon/30 flex items-center justify-center flex-shrink-0"><span class="material-symbols-outlined text-faf-neon text-2xl">key</span></div>
+                        <div class="flex-1 text-left">
+                            <p class="text-base font-black italic uppercase leading-none">Juntar-me a um Circle</p>
+                            <p class="text-[9px] text-white/40 mt-1.5 italic">Tens um ID de convite? Entra na unidade</p>
+                        </div>
+                        <span class="material-symbols-outlined text-white/20">chevron_right</span>
                     </div>
                 <?php endif; ?>
             </div>
         </div>
 
         <div id="profile" class="tab-content space-y-8 text-center pt-8">
-            <div class="relative w-32 h-32 mx-auto"><img src="<?= $userPic ?>" class="w-full h-full rounded-full border-4 border-faf-neon p-1 bg-zinc-900 shadow-2xl object-cover"></div>
-            <h3 class="text-3xl font-headline font-black italic uppercase italic tracking-tighter"><?= e($userName) ?></h3>
+            <div class="relative w-32 h-32 mx-auto"><img src="<?= $userPic ?>" class="w-full h-full rounded-full border-4 border-faf-neon p-1 bg-zinc-900 shadow-2xl object-cover" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'"></div>
+            <div>
+                <h3 class="text-3xl font-headline font-black italic uppercase italic tracking-tighter"><?= e($userName) ?></h3>
+                <p class="text-[10px] font-black text-faf-neon uppercase tracking-[0.3em] italic mt-1">Athlete ID: #<?= $user_id ?></p>
+            </div>
             <div class="grid grid-cols-3 gap-3 px-4">
                 <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Peso</p><p class="text-xl font-black italic"><?= $userData['weight'] ?? '--' ?>kg</p></div>
                 <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Idade</p><p class="text-xl font-black italic"><?= $userData['age'] ?? '--' ?></p></div>
-                <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">Alvo</p><p class="text-xl font-black italic"><?= $userData['target_distance'] ?? '--' ?>k</p></div>
+                <div class="glass-card py-6 rounded-3xl"><p class="text-[9px] text-white/30 uppercase mb-1">VDOT</p><p class="text-xl font-black italic text-faf-neon"><?= $vdot ?></p></div>
             </div>
+
+            <?php if($race_days_left !== null): ?>
+            <div class="mx-4 bg-faf-neon rounded-[35px] p-6 text-black text-left flex justify-between items-center shadow-[0_0_30px_rgba(195,244,0,0.15)]">
+                <div>
+                    <p class="text-[9px] font-black uppercase tracking-widest opacity-60 mb-1">A Missão</p>
+                    <h4 class="text-lg font-headline font-black italic uppercase tracking-tighter leading-none"><?= e($userData['race_name'] ?? $target_label) ?></h4>
+                    <p class="text-[9px] font-black uppercase mt-1 opacity-60"><?= date('d M Y', strtotime($userData['race_date'])) ?> · <?= $userData['target_distance'] ?>km</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-4xl font-headline font-black italic leading-none"><?= $race_days_left ?></p>
+                    <p class="text-[8px] font-black uppercase tracking-widest">dias</p>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <div class="mt-8 px-4 space-y-4 text-left">
                 <div class="glass-card p-6 rounded-[40px] border-l-4 border-red-600/50">
@@ -414,8 +661,25 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
     </div>
 
     <div id="search-overlay">
-        <header class="flex justify-between items-center mb-10"><h2 class="text-2xl font-headline font-black italic uppercase text-faf-neon tracking-tighter italic">Sync Unit</h2><span onclick="toggleSearch()" class="material-symbols-outlined text-white/40 cursor-pointer">close</span></header>
-        <div class="space-y-6"><div class="glass-card p-1.5 rounded-[28px] border-faf-neon/20 flex items-center px-4"><span class="material-symbols-outlined text-white/20 mr-3">fingerprint</span><input type="number" id="sid" placeholder="Athlete ID..." class="flex-1 bg-transparent py-4 text-white font-black italic outline-none"></div><button onclick="identifyAthlete()" class="w-full py-5 bg-faf-neon text-black rounded-3xl font-black uppercase italic shadow-lg">Identify</button></div>
+        <div class="glass-card p-8 rounded-[45px] max-w-sm w-full space-y-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="text-2xl font-headline font-black italic uppercase text-faf-neon tracking-tighter leading-none">Sync Unit</h2>
+                    <p class="text-[9px] text-white/30 uppercase font-black tracking-widest mt-1 italic">Adiciona um atleta pelo ID</p>
+                </div>
+                <button onclick="toggleSearch()" class="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center text-white/40 cursor-pointer" aria-label="Fechar"><span class="material-symbols-outlined text-sm">close</span></button>
+            </div>
+
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-3">
+                <span class="material-symbols-outlined text-faf-neon/50">fingerprint</span>
+                <input type="number" inputmode="numeric" id="sid" placeholder="Athlete ID (ex: 12)" class="flex-1 bg-transparent text-white font-black italic outline-none text-lg" onkeypress="if(event.key==='Enter') identifyAthlete()">
+            </div>
+            <p class="text-[9px] text-white/25 italic leading-relaxed">O teu ID é <span class="text-faf-neon font-black">#<?= $user_id ?></span> — partilha-o com os teus amigos para eles te encontrarem.</p>
+
+            <div id="search-result"></div>
+
+            <button id="btn-identify" onclick="identifyAthlete()" class="w-full py-5 bg-faf-neon text-black rounded-3xl font-black uppercase italic shadow-lg active:scale-95 transition-all disabled:opacity-50">Identificar</button>
+        </div>
     </div>
 
     <div id="abort-modal">
@@ -443,6 +707,58 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
                 </div>
             </div>
             <button id="btn-submit-feedback" onclick="submitWorkoutFeedback()" class="w-full py-4 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg transition-opacity disabled:opacity-50">Sincronizar</button>
+        </div>
+    </div>
+
+    <!-- Modal de sucesso pós-feedback: fecha o loop com o atleta -->
+    <div id="success-modal">
+        <div class="glass-card p-10 rounded-[50px] border border-faf-neon/20 max-w-sm w-full text-center space-y-6">
+            <div id="success-icon" class="text-6xl">✅</div>
+            <div>
+                <h3 id="success-title" class="text-2xl font-headline font-black italic uppercase tracking-tighter mb-2">Treino Sincronizado</h3>
+                <p id="success-body" class="text-xs text-white/50 italic leading-relaxed"></p>
+            </div>
+            <button onclick="location.reload()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg active:scale-95 transition-all">Continuar</button>
+        </div>
+    </div>
+
+    <!-- Briefing do protocolo: mostrado após o onboarding, reabrível pelo ícone ? -->
+    <div id="briefing-modal">
+        <div class="briefing-card glass-card p-8 rounded-[45px] max-w-sm w-full space-y-6">
+            <div class="text-center">
+                <p class="text-[9px] font-black uppercase tracking-[0.3em] text-faf-neon italic mb-2">Protocol Briefing</p>
+                <h3 class="text-3xl font-headline font-black italic uppercase tracking-tighter leading-none">Como funciona<br>o teu plano</h3>
+            </div>
+
+            <div class="space-y-3">
+                <p class="text-[9px] font-black uppercase text-white/30 tracking-widest italic">1 · Periodização</p>
+                <div class="flex gap-1 h-2.5 rounded-full overflow-hidden">
+                    <div class="flex-[4]" style="background:#38bdf8"></div>
+                    <div class="flex-[4]" style="background:#c3f400"></div>
+                    <div class="flex-[2]" style="background:#f97316"></div>
+                    <div class="flex-[2]" style="background:#a78bfa"></div>
+                </div>
+                <p class="text-[10px] text-white/50 italic leading-relaxed"><span style="color:#38bdf8" class="font-black">BASE</span> constrói resistência, <span style="color:#c3f400" class="font-black">BUILD</span> adiciona intensidade, <span style="color:#f97316" class="font-black">PEAK</span> é o máximo de carga e <span style="color:#a78bfa" class="font-black">TAPER</span> reduz volume para chegares fresco à prova. A cada 4 semanas há uma <span class="text-sky-300 font-black">DELOAD</span>: o volume desce de propósito — é aí que o corpo absorve o treino.</p>
+            </div>
+
+            <div class="space-y-3">
+                <p class="text-[9px] font-black uppercase text-white/30 tracking-widest italic">2 · Tipos de treino</p>
+                <div class="space-y-2 text-[10px] italic leading-relaxed">
+                    <p><span class="text-faf-neon font-black uppercase">Longão</span> <span class="text-white/50">— o treino mais longo da semana, ritmo confortável. Constrói o motor.</span></p>
+                    <p><span class="text-faf-neon font-black uppercase">Rodagem Easy</span> <span class="text-white/50">— corrida leve de recuperação. Devagar é o objetivo, não um defeito.</span></p>
+                    <p><span class="text-faf-neon font-black uppercase">Tempo Run</span> <span class="text-white/50">— ritmo "desconfortavelmente sustentável". Treina o limiar.</span></p>
+                    <p><span class="text-faf-neon font-black uppercase">Intervalado</span> <span class="text-white/50">— séries rápidas com recuperação. Sobe o VO2max.</span></p>
+                    <p><span class="text-faf-neon font-black uppercase">Fartlek</span> <span class="text-white/50">— jogo de velocidade livre: acelera e recupera sem parar.</span></p>
+                    <p><span class="text-faf-neon font-black uppercase">Galloway</span> <span class="text-white/50">— alternar corrida/caminhada. A forma inteligente de começar do zero.</span></p>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <p class="text-[9px] font-black uppercase text-white/30 tracking-widest italic">3 · O plano adapta-se a ti</p>
+                <p class="text-[10px] text-white/50 italic leading-relaxed">Depois de cada treino diz-nos como te sentiste: <span class="text-green-400 font-black">EASY</span>, <span class="text-faf-neon font-black">PERFECT</span> ou <span class="text-red-400 font-black">HARD</span>. Se 2 treinos seguidos saírem do esperado, o Neural Engine <span class="text-white font-black">recalcula automaticamente os paces de todos os treinos futuros</span> — mais rápidos se estás a voar, mais suaves se estás a sofrer. O plano nunca fica parado.</p>
+            </div>
+
+            <button onclick="closeBriefing()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg active:scale-95 transition-all">Entendido. Bora treinar 🔥</button>
         </div>
     </div>
 
@@ -509,19 +825,45 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             if (dist > 80) changeWeek(-1);
         }, {passive: true});
 
-        // AJAX FEEDBACK
+        // AJAX FEEDBACK — mostra o resultado (incluindo recalibração do plano) antes do reload
         async function submitWorkoutFeedback() {
             const btn = document.getElementById('btn-submit-feedback');
             btn.disabled = true; btn.innerText = 'A sincronizar...';
+            const status = document.getElementById('workout_status').value;
             const data = {
                 id: document.getElementById('modal_workout_id').value,
-                status: document.getElementById('workout_status').value,
+                status: status,
                 dist: document.getElementById('modal_real_dist').value,
                 pace: document.getElementById('modal_real_pace').value,
                 effort: document.querySelector('input[name="effort_level"]:checked').value
             };
-            await fetch('../src/api/checkin_engine.php', { method: 'POST', body: JSON.stringify(data) });
-            location.reload();
+            let result = { adapted: false };
+            try {
+                const res = await fetch('../src/api/checkin_engine.php', { method: 'POST', body: JSON.stringify(data) });
+                result = await res.json();
+            } catch (e) { location.reload(); return; }
+
+            document.getElementById('feedback-modal').style.display = 'none';
+            const icon = document.getElementById('success-icon');
+            const title = document.getElementById('success-title');
+            const body = document.getElementById('success-body');
+
+            if (result.adapted) {
+                icon.innerText = '🧠';
+                title.innerText = 'Plano Recalibrado';
+                body.innerText = result.direction === 'faster'
+                    ? 'Estás consistentemente acima do esperado. O Neural Engine acelerou os paces de todos os treinos futuros. Novo nível desbloqueado.'
+                    : 'Detetámos esforço elevado em treinos seguidos. O Neural Engine suavizou os paces futuros para protegeres o corpo. Recuperar também é treinar.';
+            } else if (status === 'completed') {
+                icon.innerText = '✅';
+                title.innerText = 'Treino Sincronizado';
+                body.innerText = 'Registado. O motor está a monitorizar a tua tendência de esforço — se 2 treinos seguidos saírem do esperado, os paces futuros são recalculados automaticamente.';
+            } else {
+                icon.innerText = '🕯️';
+                title.innerText = 'Treino Falhado';
+                body.innerText = 'Acontece. O importante é voltar no próximo. Se estiveres num Circle, o fogo do clã ressente-se — os teus aliados vão saber.';
+            }
+            document.getElementById('success-modal').style.display = 'flex';
         }
 
         const syncOrder = async () => {
@@ -566,17 +908,43 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             document.getElementById('gmodal-cancel').onclick = () => m.style.display = 'none';
         }
 
+        // Pesquisa de atleta com resultado inline no próprio overlay (sem alerts)
         async function identifyAthlete() {
             const athleteId = document.getElementById('sid').value;
+            const resultBox = document.getElementById('search-result');
+            const btn = document.getElementById('btn-identify');
             if(!athleteId) return;
-            const res = await fetch('../src/api/search_action.php', { method: 'POST', body: JSON.stringify({ action: 'search', athlete_id: athleteId }) });
+            btn.disabled = true;
+            resultBox.innerHTML = `<div class="skeleton h-16 w-full"></div>`;
+            try {
+                const res = await fetch('../src/api/search_action.php', { method: 'POST', body: JSON.stringify({ action: 'search', athlete_id: athleteId }) });
+                const data = await res.json();
+                btn.disabled = false;
+                if(data.success) {
+                    const pic = data.user.profile_pic || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.user.name)}`;
+                    resultBox.innerHTML = `
+                        <div class="bg-faf-neon/5 border border-faf-neon/30 rounded-3xl p-4 flex items-center gap-4">
+                            <img src="${escapeHtml(pic)}" class="w-12 h-12 rounded-full border border-faf-neon/40 object-cover" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'">
+                            <div class="flex-1 text-left">
+                                <p class="text-sm font-black italic uppercase leading-none">${escapeHtml(data.user.name)}</p>
+                                <p class="text-[9px] text-white/30 font-black uppercase mt-1">Atleta #${escapeHtml(String(data.user.id))}</p>
+                            </div>
+                            <button onclick="sendFriendRequest(${parseInt(data.user.id)}, this)" class="bg-faf-neon text-black px-4 py-2.5 rounded-xl text-[9px] font-black uppercase italic active:scale-90 transition-all disabled:opacity-50">Sincronizar</button>
+                        </div>`;
+                } else {
+                    resultBox.innerHTML = `<div class="bg-red-500/5 border border-red-500/20 rounded-2xl p-4 text-center"><p class="text-[10px] text-red-400 font-black uppercase italic">Atleta não encontrado</p><p class="text-[9px] text-white/25 italic mt-1">Confirma o ID e tenta outra vez.</p></div>`;
+                }
+            } catch (e) {
+                btn.disabled = false;
+                resultBox.innerHTML = `<p class="text-[10px] text-red-400 italic text-center">Erro de ligação. Tenta novamente.</p>`;
+            }
+        }
+
+        async function sendFriendRequest(friendId, btn) {
+            btn.disabled = true; btn.innerText = '...';
+            const res = await fetch('../src/api/social_engine.php', { method: 'POST', body: JSON.stringify({ action: 'request', friend_id: friendId }) });
             const data = await res.json();
-            if(data.success) {
-                showNeuralModal("Athlete Identified", `Sincronizar com ${data.user.name}?`, false, async () => {
-                    await fetch('../src/api/social_engine.php', { method: 'POST', body: JSON.stringify({ action: 'request', friend_id: data.user.id }) });
-                    alert('Neural request sent.');
-                });
-            } else { alert("Target not found."); }
+            btn.innerText = data.success ? 'Enviado ✓' : 'Já pedido';
         }
 
         async function handleFriend(action, friendId) {
@@ -639,6 +1007,74 @@ $coach_msg = $workout_hoje ? "Hey $first_name! Alvo identificado para hoje. Foca
             input.value = '';
             await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'send_message', message }) });
             loadCircleFeed();
+        }
+
+        // --- BRIEFING DO PROTOCOLO ---
+        function openBriefing() { document.getElementById('briefing-modal').style.display = 'flex'; }
+        function closeBriefing() { document.getElementById('briefing-modal').style.display = 'none'; }
+        <?php if($show_briefing): ?>openBriefing();<?php endif; ?>
+
+        // --- SHARE CARD: gera imagem 1080x1350 para stories/partilha ---
+        async function shareWorkout(btn) {
+            const type = btn.dataset.type, dist = btn.dataset.dist, pace = btn.dataset.pace;
+            const origIcon = btn.innerHTML;
+            btn.innerHTML = '<span class="material-symbols-outlined text-xl animate-spin">progress_activity</span>';
+            try { await document.fonts.ready; } catch(e) {}
+
+            const c = document.createElement('canvas'); c.width = 1080; c.height = 1350;
+            const x = c.getContext('2d');
+
+            // Fundo + faixa diagonal neon
+            x.fillStyle = '#080808'; x.fillRect(0, 0, 1080, 1350);
+            x.save(); x.rotate(-0.10);
+            x.fillStyle = 'rgba(195,244,0,0.07)'; x.fillRect(-200, 900, 1700, 260);
+            x.fillStyle = 'rgba(195,244,0,0.04)'; x.fillRect(-200, 1180, 1700, 120);
+            x.restore();
+
+            // Marca
+            x.textBaseline = 'alphabetic';
+            x.font = 'italic 900 90px "Plus Jakarta Sans", sans-serif';
+            x.fillStyle = '#ffffff'; x.fillText('FAF', 80, 160);
+            x.fillStyle = '#c3f400'; x.fillText('.', 80 + x.measureText('FAF').width, 160);
+            x.font = '900 26px Inter, sans-serif'; x.fillStyle = 'rgba(255,255,255,0.3)';
+            x.fillText('NEURAL PROTOCOL — COMPLETE', 82, 210);
+
+            // Tipo de treino
+            x.font = 'italic 900 110px "Plus Jakarta Sans", sans-serif';
+            x.fillStyle = '#c3f400';
+            x.fillText(type.toUpperCase(), 80, 560);
+
+            // Métricas grandes
+            x.fillStyle = '#ffffff';
+            x.font = 'italic 900 190px "Plus Jakarta Sans", sans-serif';
+            x.fillText(dist, 80, 800);
+            const distW = x.measureText(dist).width;
+            x.font = '900 44px Inter, sans-serif'; x.fillStyle = 'rgba(255,255,255,0.4)';
+            x.fillText('KM', 105 + distW, 795);
+
+            x.font = 'italic 900 90px "Plus Jakarta Sans", sans-serif'; x.fillStyle = '#ffffff';
+            x.fillText('@ ' + pace, 80, 950);
+            x.font = '900 30px Inter, sans-serif'; x.fillStyle = 'rgba(255,255,255,0.35)';
+            x.fillText('MIN / KM', 84, 1000);
+
+            // Rodapé
+            const hoje = new Date().toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' });
+            x.font = '900 32px Inter, sans-serif'; x.fillStyle = 'rgba(255,255,255,0.5)';
+            x.fillText(hoje.toUpperCase(), 80, 1230);
+            x.fillStyle = '#c3f400'; x.font = 'italic 900 40px "Plus Jakarta Sans", sans-serif';
+            x.fillText('EARN YOUR FIRE 🔥', 80, 1290);
+
+            c.toBlob(async (blob) => {
+                btn.innerHTML = origIcon;
+                const file = new File([blob], 'faf-workout.png', { type: 'image/png' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try { await navigator.share({ files: [file], title: 'FAF Workout' }); } catch(e) {}
+                } else {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob); a.download = 'faf-workout.png'; a.click();
+                    URL.revokeObjectURL(a.href);
+                }
+            }, 'image/png');
         }
 
         Sortable.create(document.getElementById('days-nav'), { animation: 300, onEnd: syncOrder });

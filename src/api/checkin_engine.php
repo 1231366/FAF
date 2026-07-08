@@ -80,6 +80,7 @@ if (!function_exists('resolveWorkoutCheckin')) {
         }
 
         // Lógica de Tendência Neural (Ajuste adaptativo do FAF)
+        $adapted = false; $adapt_direction = null;
         if ($status == 'completed' && $effort) {
             $stmt_t = $conn->prepare("SELECT neural_trend FROM user_profiles WHERE user_id = ?");
             $stmt_t->bind_param("i", $user_id);
@@ -98,6 +99,8 @@ if (!function_exists('resolveWorkoutCheckin')) {
                 $factor = ($trend >= 2) ? 0.95 : 1.05;
                 if (function_exists('recalculateFutureWeeks')) {
                     recalculateFutureWeeks($user_id, $factor);
+                    $adapted = true;
+                    $adapt_direction = ($trend >= 2) ? 'faster' : 'easier';
                 }
                 $trend = 0; // Reset após adaptação
             }
@@ -106,7 +109,7 @@ if (!function_exists('resolveWorkoutCheckin')) {
             $stmt_u->execute();
         }
 
-        return true;
+        return ['adapted' => $adapted, 'direction' => $adapt_direction];
     }
 }
 
@@ -135,9 +138,9 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
         $pace       = !empty($data['pace']) ? $data['pace'] : null;
         $effort     = !empty($data['effort']) ? $data['effort'] : null;
 
-        resolveWorkoutCheckin($conn, $user_id, $workout_id, $status, $dist, $pace, $effort);
+        $result = resolveWorkoutCheckin($conn, $user_id, $workout_id, $status, $dist, $pace, $effort);
 
-        echo json_encode(['success' => true]);
+        echo json_encode(['success' => true, 'adapted' => $result['adapted'], 'direction' => $result['direction']]);
 
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
