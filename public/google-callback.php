@@ -56,7 +56,11 @@ if (isset($_GET['code'])) {
         $_SESSION['user_id']   = $user['id'];
         $_SESSION['user_name'] = $name;
         $_SESSION['user_pic']  = $picture; // Foto para a UI
-        
+
+        // Completa um convite de Circle pendente, se o login veio de recruit.php
+        require_once __DIR__ . '/../src/core/invite.php';
+        consumePendingCircleInvite($conn, $user['id']);
+
         // Redirecionamento inteligente baseado no diagnóstico
         if ($user['diagnostic_completed'] == 1) {
             header("Location: plan.php");
@@ -74,7 +78,11 @@ if (isset($_GET['code'])) {
             $_SESSION['user_id']   = $conn->insert_id;
             $_SESSION['user_name'] = $name;
             $_SESSION['user_pic']  = $picture; // Foto para a UI
-            
+
+            // Completa um convite de Circle pendente, se o registo veio de recruit.php
+            require_once __DIR__ . '/../src/core/invite.php';
+            consumePendingCircleInvite($conn, $_SESSION['user_id']);
+
             header("Location: methricsdiagonostic.php");
         } else {
             header("Location: login.php?error=database_error");

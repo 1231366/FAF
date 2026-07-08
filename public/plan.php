@@ -92,6 +92,15 @@ $stmt_inbox->execute();
 $notifications = $stmt_inbox->get_result();
 $notif_count = $notifications->num_rows;
 
+// Rankings globais: circles pelo fogo, atletas por km reais nos últimos 30 dias
+$top_circles = $conn->query("SELECT c.id, c.name, c.streak_count, COUNT(u.id) members
+                              FROM circles c LEFT JOIN users u ON u.circle_id = c.id
+                              GROUP BY c.id ORDER BY c.streak_count DESC, members DESC LIMIT 10")->fetch_all(MYSQLI_ASSOC);
+$top_athletes = $conn->query("SELECT u.id, u.name, u.profile_pic, ROUND(SUM(COALESCE(tp.real_distance, tp.distance)), 1) km
+                               FROM training_plans tp JOIN users u ON tp.user_id = u.id
+                               WHERE tp.status = 'completed' AND tp.workout_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                               GROUP BY u.id ORDER BY km DESC LIMIT 10")->fetch_all(MYSQLI_ASSOC);
+
 /**
  * 3. ENGINE LAYER
  */
@@ -172,6 +181,40 @@ foreach ($stmt_stk->get_result()->fetch_all(MYSQLI_ASSOC) as $row_s) {
     else break;
 }
 
+// Badges do atleta
+require_once __DIR__ . '/../src/engines/badge_engine.php';
+$stmt_bg = $conn->prepare("SELECT badge_code, earned_at FROM user_badges WHERE user_id = ?");
+$stmt_bg->bind_param("i", $user_id);
+$stmt_bg->execute();
+$my_badges = array_column($stmt_bg->get_result()->fetch_all(MYSQLI_ASSOC), 'earned_at', 'badge_code');
+
+// Recap semanal: a última semana do plano já terminada (para o modal de resumo)
+$last_week_recap = null;
+$stmt_lw = $conn->prepare("SELECT week_number FROM training_plans WHERE user_id = ?
+                            GROUP BY week_number HAVING MAX(workout_date) < CURDATE()
+                            ORDER BY MAX(workout_date) DESC LIMIT 1");
+$stmt_lw->bind_param("i", $user_id);
+$stmt_lw->execute();
+$last_finished_week = $stmt_lw->get_result()->fetch_assoc()['week_number'] ?? null;
+if ($last_finished_week !== null) {
+    foreach ($cycle_weeks as $cw_row) {
+        if ((int)$cw_row['week_number'] !== (int)$last_finished_week) continue;
+        $wk_closed = (int)$cw_row['done_cnt'] + (int)$cw_row['skip_cnt'] + (int)$cw_row['overdue_cnt'];
+        $wk_consistency = $wk_closed > 0 ? round(((int)$cw_row['done_cnt'] / $wk_closed) * 100) : 0;
+        $recap_coach = $wk_consistency >= 100 ? "Semana perfeita. É disto que se fazem os grandes ciclos." :
+                       ($wk_consistency >= 70 ? "Semana sólida. Consolida e ataca a próxima." :
+                       "Semana difícil. Esquece — o plano já se adaptou. Recomeça hoje.");
+        $last_week_recap = [
+            'week' => (int)$cw_row['week_number'],
+            'done_km' => (float)$cw_row['done_km'],
+            'planned_km' => (float)$cw_row['planned_km'],
+            'consistency' => $wk_consistency,
+            'coach' => $recap_coach,
+        ];
+        break;
+    }
+}
+
 // Countdown para a prova
 $race_days_left = null;
 $race_label_hdr = $target_label;
@@ -248,7 +291,7 @@ if ($workout_hoje) {
         ::-webkit-scrollbar { display: none; }
         .nav-active { color: #c3f400 !important; background: rgba(195, 244, 0, 0.1); border-radius: 20px; }
         .drag-handle { cursor: grab; }
-        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal, #briefing-modal, #success-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal, #briefing-modal, #success-modal, #recap-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
         #briefing-modal .briefing-card { max-height: 85vh; overflow-y: auto; }
         input:focus, textarea:focus, button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(195, 244, 0, 0.5); }
         .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%); background-size: 400% 100%; animation: skeleton-pulse 1.4s ease infinite; border-radius: 12px; }
@@ -496,7 +539,7 @@ if ($workout_hoje) {
 
         <div id="club" class="tab-content space-y-6">
             <div class="flex justify-between items-center pt-4"><h2 class="text-4xl font-headline font-black italic uppercase tracking-tighter leading-none">Syndicate</h2><button onclick="toggleSearch()" class="w-12 h-12 rounded-full bg-faf-neon text-black flex items-center justify-center active:scale-90 shadow-lg"><span class="material-symbols-outlined font-black">person_add</span></button></div>
-            <div class="flex gap-8 border-b border-white/5"><button onclick="toggleClubSubTab('syndicate')" id="btn-club-syn" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-faf-neon border-b-2 border-faf-neon">Friends</button><button onclick="toggleClubSubTab('circle')" id="btn-club-cir" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-white/30">The Circle</button></div>
+            <div class="flex gap-8 border-b border-white/5"><button onclick="toggleClubSubTab('syndicate')" id="btn-club-syn" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-faf-neon border-b-2 border-faf-neon">Friends</button><button onclick="toggleClubSubTab('circle')" id="btn-club-cir" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-white/30">The Circle</button><button onclick="toggleClubSubTab('ranks')" id="btn-club-rnk" class="pb-3 text-xs font-black uppercase italic tracking-tighter text-white/30">Ranks</button></div>
 
             <div id="club-syndicate-hub" class="space-y-4">
                 <?php foreach($my_friends as $f): ?>
@@ -518,9 +561,14 @@ if ($workout_hoje) {
                         <div class="text-center text-3xl"><?= $fire['emoji'] ?> <span class="block text-xl font-black"><?= $streak ?></span><span class="block text-[8px] font-black uppercase tracking-widest"><?= $fire['label'] ?></span></div>
                     </div>
 
-                    <button onclick="shareRecruit()" class="w-full py-4 border border-faf-neon/40 text-faf-neon rounded-2xl text-[10px] font-black uppercase italic flex items-center justify-center gap-2">
-                        <span class="material-symbols-outlined text-sm">share</span> Recruit Allies
-                    </button>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="shareRecruit()" class="py-4 border border-faf-neon/40 text-faf-neon rounded-2xl text-[10px] font-black uppercase italic flex items-center justify-center gap-2 active:scale-95 transition-all">
+                            <span class="material-symbols-outlined text-sm">person_add</span> Recrutar
+                        </button>
+                        <button onclick="shareCircleCard()" class="py-4 bg-faf-neon text-black rounded-2xl text-[10px] font-black uppercase italic flex items-center justify-center gap-2 active:scale-95 transition-all">
+                            <span class="material-symbols-outlined text-sm">ios_share</span> Mostrar Fogo
+                        </button>
+                    </div>
 
                     <div class="glass-card rounded-[35px] p-6 space-y-4">
                         <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Clan Leaderboard</p>
@@ -568,6 +616,38 @@ if ($workout_hoje) {
                     </div>
                 <?php endif; ?>
             </div>
+
+            <div id="club-ranks-hub" class="hidden space-y-6">
+                <div class="glass-card rounded-[35px] p-6 space-y-4">
+                    <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">🔥 Circles em Chamas</p>
+                    <?php foreach($top_circles as $idx => $tc): $tf = fireTier((int)$tc['streak_count']); ?>
+                    <div class="flex justify-between items-center <?= !empty($userData['circle_id']) && (int)$tc['id'] === (int)$userData['circle_id'] ? 'bg-faf-neon/10 -mx-3 px-3 py-1.5 rounded-xl' : '' ?>">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-black <?= $idx < 3 ? 'text-faf-neon' : 'text-white/30' ?>"><?= str_pad($idx+1, 2, '0', STR_PAD_LEFT) ?></span>
+                            <div>
+                                <p class="text-xs font-black italic uppercase leading-none"><?= e($tc['name']) ?></p>
+                                <p class="text-[8px] text-white/30 font-black uppercase mt-0.5"><?= $tc['members'] ?> atletas</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-black italic"><?= $tf['emoji'] ?> <?= $tc['streak_count'] ?></span>
+                    </div>
+                    <?php endforeach; if(empty($top_circles)) echo "<p class='text-[10px] text-white/20 text-center py-6 italic'>Ainda não há circles. Funda o primeiro.</p>"; ?>
+                </div>
+
+                <div class="glass-card rounded-[35px] p-6 space-y-4">
+                    <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">🏃 Atletas · KM (30 dias)</p>
+                    <?php foreach($top_athletes as $idx => $ta): ?>
+                    <div class="flex justify-between items-center <?= (int)$ta['id'] === $user_id ? 'bg-faf-neon/10 -mx-3 px-3 py-1.5 rounded-xl' : '' ?>">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-black <?= $idx < 3 ? 'text-faf-neon' : 'text-white/30' ?>"><?= str_pad($idx+1, 2, '0', STR_PAD_LEFT) ?></span>
+                            <img src="<?= avatar($ta['profile_pic'], $ta['name']) ?>" class="w-7 h-7 rounded-full object-cover" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='https://api.dicebear.com/7.x/avataaars/svg?seed=FAF'">
+                            <p class="text-xs font-black italic uppercase"><?= e($ta['name']) ?></p>
+                        </div>
+                        <span class="text-xs font-black italic text-faf-neon"><?= $ta['km'] ?> km</span>
+                    </div>
+                    <?php endforeach; if(empty($top_athletes)) echo "<p class='text-[10px] text-white/20 text-center py-6 italic'>Sem atividade nos últimos 30 dias.</p>"; ?>
+                </div>
+            </div>
         </div>
 
         <div id="profile" class="tab-content space-y-8 text-center pt-8">
@@ -595,6 +675,28 @@ if ($workout_hoje) {
                 </div>
             </div>
             <?php endif; ?>
+
+            <!-- Badges: conquistas ganhas brilham, as restantes ficam a desbloquear -->
+            <div class="mx-4 glass-card rounded-[35px] p-6 text-left space-y-4">
+                <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic">Conquistas · <?= count($my_badges) ?>/<?= count(BADGE_DEFS) ?></p>
+                <div class="grid grid-cols-4 gap-3">
+                    <?php foreach(BADGE_DEFS as $code => $b): $has = isset($my_badges[$code]); ?>
+                    <div class="text-center <?= $has ? '' : 'opacity-25 grayscale' ?>" title="<?= e($b['name'] . ' — ' . $b['desc']) ?>">
+                        <div class="text-3xl mb-1 <?= $has ? 'drop-shadow-[0_0_8px_rgba(195,244,0,0.4)]' : '' ?>"><?= $b['emoji'] ?></div>
+                        <p class="text-[7px] font-black uppercase tracking-tight leading-tight <?= $has ? 'text-faf-neon' : 'text-white/40' ?>"><?= $b['name'] ?></p>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <!-- Notificações push -->
+            <div class="mx-4 glass-card rounded-[35px] p-6 text-left flex items-center justify-between gap-4">
+                <div>
+                    <p class="text-[9px] font-black uppercase text-faf-neon tracking-widest italic mb-1">Lembretes de Treino</p>
+                    <p class="text-[9px] text-white/40 italic leading-relaxed">Recebe uma notificação no dia de cada treino.</p>
+                </div>
+                <button id="btn-push" onclick="togglePush()" class="px-5 py-3 rounded-2xl text-[9px] font-black uppercase italic border border-faf-neon/40 text-faf-neon active:scale-95 transition-all whitespace-nowrap disabled:opacity-50">Ativar</button>
+            </div>
 
             <div class="mt-8 px-4 space-y-4 text-left">
                 <div class="glass-card p-6 rounded-[40px] border-l-4 border-red-600/50">
@@ -718,9 +820,32 @@ if ($workout_hoje) {
                 <h3 id="success-title" class="text-2xl font-headline font-black italic uppercase tracking-tighter mb-2">Treino Sincronizado</h3>
                 <p id="success-body" class="text-xs text-white/50 italic leading-relaxed"></p>
             </div>
+            <div id="success-badges" class="hidden space-y-2"></div>
             <button onclick="location.reload()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg active:scale-95 transition-all">Continuar</button>
         </div>
     </div>
+
+    <?php if($last_week_recap): ?>
+    <!-- Recap da semana terminada (mostrado 1x por semana, controlado por localStorage) -->
+    <div id="recap-modal">
+        <div class="glass-card p-8 rounded-[50px] border border-faf-neon/20 max-w-sm w-full text-center space-y-6">
+            <p class="text-[9px] font-black uppercase tracking-[0.3em] text-faf-neon italic">Weekly Recap</p>
+            <h3 class="text-3xl font-headline font-black italic uppercase tracking-tighter leading-none">Semana <?= $last_week_recap['week'] ?><br>Fechada</h3>
+            <div class="grid grid-cols-2 gap-3">
+                <div class="bg-white/5 rounded-3xl p-5">
+                    <p class="text-3xl font-headline font-black italic text-faf-neon leading-none"><?= number_format($last_week_recap['done_km'], 1) ?></p>
+                    <p class="text-[8px] font-black uppercase tracking-widest text-white/40 mt-1">km reais / <?= number_format($last_week_recap['planned_km'], 1) ?> plano</p>
+                </div>
+                <div class="bg-white/5 rounded-3xl p-5">
+                    <p class="text-3xl font-headline font-black italic leading-none <?= $last_week_recap['consistency'] >= 80 ? 'text-faf-neon' : 'text-orange-400' ?>"><?= $last_week_recap['consistency'] ?>%</p>
+                    <p class="text-[8px] font-black uppercase tracking-widest text-white/40 mt-1">consistência</p>
+                </div>
+            </div>
+            <p class="text-xs text-white/50 italic leading-relaxed">"<?= $last_week_recap['coach'] ?>"</p>
+            <button onclick="closeRecap()" class="w-full py-5 bg-faf-neon text-black rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg active:scale-95 transition-all">Próxima semana 💪</button>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Briefing do protocolo: mostrado após o onboarding, reabrível pelo ícone ? -->
     <div id="briefing-modal">
@@ -863,6 +988,22 @@ if ($workout_hoje) {
                 title.innerText = 'Treino Falhado';
                 body.innerText = 'Acontece. O importante é voltar no próximo. Se estiveres num Circle, o fogo do clã ressente-se — os teus aliados vão saber.';
             }
+
+            // Badges desbloqueados neste check-in
+            const badgeBox = document.getElementById('success-badges');
+            if (result.badges && result.badges.length > 0) {
+                badgeBox.innerHTML = result.badges.map(b =>
+                    `<div class="bg-faf-neon/10 border border-faf-neon/40 rounded-2xl p-4 flex items-center gap-4 text-left">
+                        <span class="text-4xl">${escapeHtml(b.emoji)}</span>
+                        <div>
+                            <p class="text-xs font-black italic uppercase text-faf-neon leading-none">Badge desbloqueado: ${escapeHtml(b.name)}</p>
+                            <p class="text-[9px] text-white/40 italic mt-1">${escapeHtml(b.desc)}</p>
+                        </div>
+                    </div>`).join('');
+                badgeBox.classList.remove('hidden');
+            } else {
+                badgeBox.classList.add('hidden');
+            }
             document.getElementById('success-modal').style.display = 'flex';
         }
 
@@ -883,10 +1024,14 @@ if ($workout_hoje) {
         function toggleSearch() { const el = document.getElementById('search-overlay'); el.style.display = (el.style.display === 'flex') ? 'none' : 'flex'; }
 
         function toggleClubSubTab(sub) {
-            document.getElementById('club-syndicate-hub').classList.toggle('hidden', sub !== 'syndicate');
-            document.getElementById('club-circle-hub').classList.toggle('hidden', sub !== 'circle');
-            document.getElementById('btn-club-syn').className = sub === 'syndicate' ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon" : "pb-3 text-xs font-black uppercase italic text-white/30";
-            document.getElementById('btn-club-cir').className = sub === 'circle' ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon" : "pb-3 text-xs font-black uppercase italic text-white/30";
+            const tabs = { syndicate: 'club-syndicate-hub', circle: 'club-circle-hub', ranks: 'club-ranks-hub' };
+            const btns = { syndicate: 'btn-club-syn', circle: 'btn-club-cir', ranks: 'btn-club-rnk' };
+            for (const key in tabs) {
+                document.getElementById(tabs[key]).classList.toggle('hidden', key !== sub);
+                document.getElementById(btns[key]).className = key === sub
+                    ? "pb-3 text-xs font-black uppercase italic text-faf-neon border-b-2 border-faf-neon"
+                    : "pb-3 text-xs font-black uppercase italic text-white/30";
+            }
             if (sub === 'circle') loadCircleFeed();
         }
 
@@ -972,9 +1117,57 @@ if ($workout_hoje) {
             });
         }
 
+        // Link real de convite: abre recruit.php que faz join automático após login
         function shareRecruit() {
-            const link = `https://faf.app/recruit?circle=<?= $userData['circle_id'] ?? '' ?>`;
-            navigator.clipboard.writeText(link).then(() => alert("Recruitment link copied to clipboard!"));
+            const link = new URL('recruit.php?circle=<?= $userData['circle_id'] ?? '' ?>', location.href).href;
+            const text = 'Junta-te ao meu Circle no FAF — se falhares um treino, o fogo apaga-se para todos. 🔥';
+            if (navigator.share) {
+                navigator.share({ title: 'FAF Circle', text, url: link }).catch(() => {});
+            } else {
+                navigator.clipboard.writeText(link).then(() => alert('Link de convite copiado!'));
+            }
+        }
+
+        // Share card do Circle: fogo do clã em formato story
+        async function shareCircleCard() {
+            try { await document.fonts.ready; } catch(e) {}
+            const c = document.createElement('canvas'); c.width = 1080; c.height = 1350;
+            const x = c.getContext('2d');
+            x.fillStyle = '#080808'; x.fillRect(0, 0, 1080, 1350);
+            x.save(); x.rotate(-0.10);
+            x.fillStyle = 'rgba(195,244,0,0.07)'; x.fillRect(-200, 900, 1700, 260);
+            x.restore();
+
+            x.font = 'italic 900 90px "Plus Jakarta Sans", sans-serif';
+            x.fillStyle = '#ffffff'; x.fillText('FAF', 80, 160);
+            x.fillStyle = '#c3f400'; x.fillText('.', 80 + x.measureText('FAF').width, 160);
+            x.font = '900 26px Inter, sans-serif'; x.fillStyle = 'rgba(255,255,255,0.3)';
+            x.fillText('CIRCLE REPORT', 82, 210);
+
+            x.font = '200px serif';
+            x.fillText('<?= $fire['emoji'] ?>'.slice(0, 2), 80, 560);
+
+            x.font = 'italic 900 96px "Plus Jakarta Sans", sans-serif'; x.fillStyle = '#c3f400';
+            x.fillText(<?= json_encode(mb_strtoupper($circle_name)) ?>, 80, 720);
+
+            x.font = 'italic 900 170px "Plus Jakarta Sans", sans-serif'; x.fillStyle = '#ffffff';
+            x.fillText('<?= (int)$streak ?>', 80, 930);
+            x.font = '900 40px Inter, sans-serif'; x.fillStyle = 'rgba(255,255,255,0.4)';
+            x.fillText('DIAS DE FOGO · <?= $fire['label'] ?> · <?= count($clan_members) ?> ATLETAS', 84, 990);
+
+            x.fillStyle = '#c3f400'; x.font = 'italic 900 40px "Plus Jakarta Sans", sans-serif';
+            x.fillText('NINGUÉM FALHA. O FOGO NÃO APAGA.', 80, 1250);
+
+            c.toBlob(async (blob) => {
+                const file = new File([blob], 'faf-circle.png', { type: 'image/png' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try { await navigator.share({ files: [file], title: 'FAF Circle' }); } catch(e) {}
+                } else {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob); a.download = 'faf-circle.png'; a.click();
+                    URL.revokeObjectURL(a.href);
+                }
+            }, 'image/png');
         }
 
         function escapeHtml(str) {
@@ -1013,6 +1206,63 @@ if ($workout_hoje) {
         function openBriefing() { document.getElementById('briefing-modal').style.display = 'flex'; }
         function closeBriefing() { document.getElementById('briefing-modal').style.display = 'none'; }
         <?php if($show_briefing): ?>openBriefing();<?php endif; ?>
+
+        // --- WEEKLY RECAP: uma vez por semana terminada, via localStorage ---
+        <?php if($last_week_recap && !$show_briefing): ?>
+        (function() {
+            const key = 'faf_recap_seen_<?= $user_id ?>_<?= $last_week_recap['week'] ?>';
+            if (!localStorage.getItem(key)) {
+                document.getElementById('recap-modal').style.display = 'flex';
+            }
+            window.closeRecap = function() {
+                localStorage.setItem(key, '1');
+                document.getElementById('recap-modal').style.display = 'none';
+            };
+        })();
+        <?php endif; ?>
+
+        // --- WEB PUSH: lembretes de treino ---
+        const VAPID_PUBLIC = '<?= $_ENV['VAPID_PUBLIC_KEY'] ?? '' ?>';
+
+        function urlB64ToUint8(base64) {
+            const padding = '='.repeat((4 - base64.length % 4) % 4);
+            const raw = atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'));
+            return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+        }
+
+        async function refreshPushButton() {
+            const btn = document.getElementById('btn-push');
+            if (!btn) return;
+            if (!('serviceWorker' in navigator) || !('PushManager' in window) || !VAPID_PUBLIC) {
+                btn.innerText = 'Indisponível'; btn.disabled = true; return;
+            }
+            const reg = await navigator.serviceWorker.getRegistration();
+            const sub = reg ? await reg.pushManager.getSubscription() : null;
+            btn.innerText = sub ? 'Ativado ✓' : 'Ativar';
+            btn.dataset.active = sub ? '1' : '0';
+        }
+
+        async function togglePush() {
+            const btn = document.getElementById('btn-push');
+            btn.disabled = true;
+            try {
+                const reg = await navigator.serviceWorker.register('sw.js');
+                await navigator.serviceWorker.ready;
+                const existing = await reg.pushManager.getSubscription();
+                if (existing) {
+                    await fetch('../src/api/push_engine.php', { method: 'POST', body: JSON.stringify({ action: 'unsubscribe', endpoint: existing.endpoint }) });
+                    await existing.unsubscribe();
+                } else {
+                    const perm = await Notification.requestPermission();
+                    if (perm !== 'granted') { btn.disabled = false; return; }
+                    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(VAPID_PUBLIC) });
+                    await fetch('../src/api/push_engine.php', { method: 'POST', body: JSON.stringify({ action: 'subscribe', subscription: sub.toJSON() }) });
+                }
+            } catch (e) { console.error('push:', e); }
+            btn.disabled = false;
+            refreshPushButton();
+        }
+        refreshPushButton();
 
         // --- SHARE CARD: gera imagem 1080x1350 para stories/partilha ---
         async function shareWorkout(btn) {

@@ -140,7 +140,14 @@ if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
 
         $result = resolveWorkoutCheckin($conn, $user_id, $workout_id, $status, $dist, $pace, $effort);
 
-        echo json_encode(['success' => true, 'adapted' => $result['adapted'], 'direction' => $result['direction']]);
+        // Badges: só faz sentido verificar depois de um treino concluído
+        $new_badges = [];
+        if ($status === 'completed') {
+            require_once __DIR__ . '/../engines/badge_engine.php';
+            $new_badges = checkAndAwardBadges($conn, $user_id);
+        }
+
+        echo json_encode(['success' => true, 'adapted' => $result['adapted'], 'direction' => $result['direction'], 'badges' => $new_badges]);
 
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);

@@ -16,6 +16,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if (password_verify($password, $user['password'])) {
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['user_name'] = $user['name'];
+
+            // Completa um convite de Circle pendente, se o login veio de recruit.php
+            require_once __DIR__ . '/invite.php';
+            consumePendingCircleInvite($conn, $user['id']);
             
             // Verifica se o atleta já concluiu o diagnóstico neural
             if ($user['diagnostic_completed'] == 1) {
