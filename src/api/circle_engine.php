@@ -13,6 +13,14 @@ $user_id = $_SESSION['user_id'];
 $data = json_decode(file_get_contents('php://input'), true);
 $action = $data['action'] ?? '';
 
+if ($action === 'leave') {
+    require_once __DIR__ . '/../engines/circle_helpers.php';
+    leaveCircle($conn, $user_id);
+    unset($_SESSION['circle_id']);
+    echo json_encode(['success' => true]);
+    exit();
+}
+
 if ($action === 'create') {
     $name = $conn->real_escape_string($data['name'] ?? 'Novo Circle');
 
@@ -29,7 +37,7 @@ if ($action === 'create') {
 
         if ($update->execute()) {
             // --- CORREÇÃO CRÍTICA ---
-            // Atualizamos a sessão para que o public_hub.php saiba IMEDIATAMENTE
+            // Atualizamos a sessão para que o plan.php saiba IMEDIATAMENTE
             // que o utilizador já pertence a um Circle após o reload.
             $_SESSION['circle_id'] = $circle_id;
 

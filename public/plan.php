@@ -26,7 +26,7 @@ unset($_SESSION['plan_generated_now']);
 /**
  * 1. DATA LAYER
  */
-$query = "SELECT u.name, u.profile_pic, u.circle_id, p.* FROM users u LEFT JOIN user_profiles p ON u.id = p.user_id WHERE u.id = ?";
+$query = "SELECT u.name, u.profile_pic, u.circle_id, u.google_id, p.* FROM users u LEFT JOIN user_profiles p ON u.id = p.user_id WHERE u.id = ?";
 $stmt = $conn->prepare($query);
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
@@ -291,7 +291,7 @@ if ($workout_hoje) {
         ::-webkit-scrollbar { display: none; }
         .nav-active { color: #c3f400 !important; background: rgba(195, 244, 0, 0.1); border-radius: 20px; }
         .drag-handle { cursor: grab; }
-        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal, #briefing-modal, #success-modal, #recap-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
+        #abort-modal, #feedback-modal, #neural-inbox, #search-overlay, #generic-modal, #briefing-modal, #success-modal, #recap-modal, #delete-account-modal { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,0.92); backdrop-filter: blur(15px); align-items: center; justify-content: center; padding: 24px; }
         #briefing-modal .briefing-card { max-height: 85vh; overflow-y: auto; }
         input:focus, textarea:focus, button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(195, 244, 0, 0.5); }
         .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%); background-size: 400% 100%; animation: skeleton-pulse 1.4s ease infinite; border-radius: 12px; }
@@ -592,6 +592,8 @@ if ($workout_hoje) {
                             <button onclick="sendCircleMessage()" class="w-10 h-10 rounded-2xl bg-faf-neon text-black flex items-center justify-center"><span class="material-symbols-outlined text-sm font-black">send</span></button>
                         </div>
                     </div>
+
+                    <button onclick="confirmLeaveCircle()" class="w-full py-3 text-[9px] font-black uppercase italic text-white/30 hover:text-red-400 transition-colors">Sair do Circle</button>
                 <?php else: ?>
                     <div class="text-center pt-4 pb-2">
                         <div class="text-5xl mb-3">🔥</div>
@@ -704,7 +706,9 @@ if ($workout_hoje) {
                     <h4 class="text-xl font-headline font-black italic uppercase tracking-tighter mb-4">Protocol Actions</h4>
                     
                     <button onclick="openAbortModal()" class="w-full py-4 bg-red-600/10 border border-red-600/20 rounded-2xl text-[10px] font-black uppercase italic tracking-widest text-red-500 mb-4 active:bg-red-600 active:text-white transition-all">Incinerar Plano Atual</button>
-                    
+
+                    <button onclick="openDeleteAccountModal()" class="w-full py-4 bg-red-600/10 border border-red-600/20 rounded-2xl text-[10px] font-black uppercase italic tracking-widest text-red-500 mb-4 active:bg-red-600 active:text-white transition-all">Apagar Conta</button>
+
                     <a href="logout.php" class="flex items-center justify-center w-full py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase italic tracking-widest text-white/50 active:bg-white active:text-black transition-all">
                         <span class="material-symbols-outlined mr-2 text-sm">logout</span> Terminar Sessão
                     </a>
@@ -791,6 +795,24 @@ if ($workout_hoje) {
             <div class="space-y-3">
                 <button onclick="window.location.href='../src/api/abort_engine.php'" class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg">Confirmar Incineração</button>
                 <button onclick="closeAbortModal()" class="w-full py-5 bg-white/5 text-white/40 rounded-2xl font-black uppercase italic text-xs tracking-widest">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="delete-account-modal">
+        <div class="glass-card p-10 rounded-[50px] border border-red-600/30 max-w-sm w-full text-center space-y-6">
+            <span class="material-symbols-outlined text-red-600 text-6xl">delete_forever</span>
+            <div>
+                <h3 class="text-2xl font-headline font-black italic uppercase tracking-tighter text-white mb-2">Apagar Conta</h3>
+                <p class="text-xs text-white/40 italic leading-relaxed">Isto apaga permanentemente o teu perfil, plano de treino, amizades e badges. Não há volta atrás.</p>
+            </div>
+            <?php if(empty($userData['google_id'])): ?>
+            <input type="password" id="delete-account-password" placeholder="Confirma a tua password" class="w-full bg-white/5 border border-red-600/20 rounded-2xl p-4 text-sm text-white outline-none text-center">
+            <?php endif; ?>
+            <p id="delete-account-error" class="text-[10px] text-red-400 italic hidden"></p>
+            <div class="space-y-3">
+                <button id="btn-confirm-delete" onclick="confirmDeleteAccount()" class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase italic text-xs tracking-widest shadow-lg disabled:opacity-50">Apagar Definitivamente</button>
+                <button onclick="closeDeleteAccountModal()" class="w-full py-5 bg-white/5 text-white/40 rounded-2xl font-black uppercase italic text-xs tracking-widest">Cancelar</button>
             </div>
         </div>
     </div>
@@ -1015,6 +1037,45 @@ if ($workout_hoje) {
 
         function openAbortModal() { document.getElementById('abort-modal').style.display = 'flex'; }
         function closeAbortModal() { document.getElementById('abort-modal').style.display = 'none'; }
+
+        // --- SAIR DO CIRCLE ---
+        function confirmLeaveCircle() {
+            showNeuralModal("Sair do Circle", "Vais deixar o Circle. Se fores o líder, a liderança passa para outro membro. Confirmas?", false, async () => {
+                await fetch('../src/api/circle_engine.php', { method: 'POST', body: JSON.stringify({ action: 'leave' }) });
+                location.reload();
+            });
+        }
+
+        // --- APAGAR CONTA ---
+        function openDeleteAccountModal() {
+            document.getElementById('delete-account-error').classList.add('hidden');
+            const pwInput = document.getElementById('delete-account-password');
+            if (pwInput) pwInput.value = '';
+            document.getElementById('delete-account-modal').style.display = 'flex';
+        }
+        function closeDeleteAccountModal() { document.getElementById('delete-account-modal').style.display = 'none'; }
+
+        async function confirmDeleteAccount() {
+            const btn = document.getElementById('btn-confirm-delete');
+            const errEl = document.getElementById('delete-account-error');
+            const pwInput = document.getElementById('delete-account-password');
+            btn.disabled = true; btn.innerText = 'A apagar...';
+            errEl.classList.add('hidden');
+
+            const res = await fetch('../src/api/account_engine.php', {
+                method: 'POST',
+                body: JSON.stringify({ action: 'delete', password: pwInput ? pwInput.value : '' })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                window.location.href = 'login.php';
+            } else {
+                btn.disabled = false; btn.innerText = 'Apagar Definitivamente';
+                errEl.innerText = data.error || 'Erro ao apagar conta.';
+                errEl.classList.remove('hidden');
+            }
+        }
         function openCheckIn(id, type, dist) { document.getElementById('modal_workout_id').value = id; document.getElementById('modal_real_dist').value = dist; document.getElementById('feedback-modal').style.display = 'flex'; }
         function closeCheckIn() { document.getElementById('feedback-modal').style.display = 'none'; }
         function toggleFeedbackFields() { document.getElementById('feedback_fields').style.display = (document.getElementById('workout_status').value === 'completed') ? 'block' : 'none'; }

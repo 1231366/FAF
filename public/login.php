@@ -82,6 +82,17 @@ $google_login_url = $client->createAuthUrl();
                     Conta Criada! Faz Login
                 </div>
             <?php endif; ?>
+
+            <?php if(($_GET['recovery'] ?? '') === 'sent'): ?>
+                <div class="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-2xl text-primary text-[10px] font-black uppercase tracking-widest text-center leading-relaxed">
+                    Se existir uma conta com esse email, enviámos um link de recuperação.
+                </div>
+            <?php elseif(($_GET['recovery'] ?? '') === 'debug' && !empty($_GET['link'])): ?>
+                <div class="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl text-yellow-500 text-[10px] font-black uppercase tracking-widest text-center space-y-2">
+                    <p>Modo debug: SMTP não configurado. Link de reset:</p>
+                    <a href="<?= htmlspecialchars($_GET['link'], ENT_QUOTES, 'UTF-8') ?>" class="underline break-all normal-case font-bold"><?= htmlspecialchars($_GET['link'], ENT_QUOTES, 'UTF-8') ?></a>
+                </div>
+            <?php endif; ?>
             
             <div id="socialButtons" class="space-y-3 mb-8">
                 <a href="<?= $google_login_url ?>" class="social-btn bg-white/5">

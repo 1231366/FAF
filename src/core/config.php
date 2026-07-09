@@ -38,6 +38,16 @@ define('STRAVA_CLIENT_ID', $_ENV['STRAVA_CLIENT_ID'] ?? '');
 define('STRAVA_CLIENT_SECRET', $_ENV['STRAVA_CLIENT_SECRET'] ?? '');
 define('STRAVA_REDIRECT', $_ENV['STRAVA_REDIRECT_URL'] ?? 'http://localhost/FAF/public/strava-callback.php');
 
+// SMTP (recuperação de password). Se MAIL_HOST estiver vazio, o link de reset
+// é devolvido diretamente na resposta em vez de enviado por email — só em DEBUG.
+define('MAIL_HOST', $_ENV['MAIL_HOST'] ?? '');
+define('MAIL_PORT', $_ENV['MAIL_PORT'] ?? 587);
+define('MAIL_USER', $_ENV['MAIL_USER'] ?? '');
+define('MAIL_PASS', $_ENV['MAIL_PASS'] ?? '');
+define('MAIL_FROM', $_ENV['MAIL_FROM'] ?? 'no-reply@faf.app');
+define('APP_URL', rtrim($_ENV['APP_URL'] ?? 'http://localhost/FAF', '/'));
+define('APP_DEBUG', ($_ENV['DEBUG'] ?? 'false') === 'true');
+
 // CONEXÃO
 $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 if ($conn->connect_error) {
